@@ -1,0 +1,47 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: db-navigator
+
+  # H2 embedded database for driver metadata registry
+  # Aligned with RaccoonX's data/drivers.db (SQLite)
+  datasource:
+    url: jdbc:h2:file:./data/registry;AUTO_SERVER=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+# ---- DB Navigator custom configuration ----
+dbnav:
+  # Driver directory root (aligned with RaccoonX: drivers/<db_type>/<version>/<jar>)
+  drivers-dir: ./drivers
+
+  # Data directory (for H2 registry DB and connection configs)
+  data-dir: ./data
+
+  # Connection pool defaults (HikariCP)
+  pool:
+    maximum-pool-size: 10
+    minimum-idle: 2
+    connection-timeout: 30000
+    idle-timeout: 600000
+    max-lifetime: 1800000
+
+  # Driver seed file (aligned with RaccoonX's modules/config/drivers_seed.json)
+  drivers-seed: classpath:drivers-seed.json
+
+  # Database types definition (aligned with RaccoonX's builtin_types.json)
+  db-types-config: classpath:db-types.json
+
+  # 巡检模板种子（21 章框架 + 各库巡检 SQL，对齐 RaccoonX init_db）
+  inspection-templates: classpath:inspection/templates.json
+
+  # 配置基线种子（对齐 RaccoonX _builtin_default_baselines）
+  inspection-baselines: classpath:inspection/baselines.json

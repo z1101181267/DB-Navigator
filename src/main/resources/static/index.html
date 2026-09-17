@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB Navigator · 数据库纳管平台</title>
+    <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+    <div class="brand">
+        <span class="brand-mark">DN</span>
+        <div class="brand-text">
+            <strong>DB Navigator</strong>
+            <small>多数据库纳管平台</small>
+        </div>
+    </div>
+    <div class="topbar-right">
+        <span class="badge badge-soft" id="modeBadge">检测后端…</span>
+        <span class="dot-status" id="statusDot"></span>
+        <span class="status-text" id="statusText">连接中</span>
+    </div>
+</header>
+
+<div class="layout">
+    <nav class="sidebar">
+        <button class="nav-item active" data-view="datasources">
+            <span class="nav-icon">🗄</span><span>数据源纳管</span>
+        </button>
+        <button class="nav-item" data-view="drivers">
+            <span class="nav-icon">🧩</span><span>驱动管理</span>
+        </button>
+        <button class="nav-item" data-view="inspection">
+            <span class="nav-icon">🔍</span><span>巡检配置</span>
+        </button>
+        <button class="nav-item" data-view="baselines">
+            <span class="nav-icon">📐</span><span>基线规则</span>
+        </button>
+        <button class="nav-item" data-view="inspectionRun">
+            <span class="nav-icon">▶</span><span>巡检执行</span>
+        </button>
+        <button class="nav-item" data-view="runs">
+            <span class="nav-icon">📄</span><span>巡检历史</span>
+        </button>
+        <button class="nav-item" data-view="query">
+            <span class="nav-icon">⌨</span><span>SQL 编辑器</span>
+        </button>
+        <div class="sidebar-foot">
+            <div class="foot-title">纳管数据库</div>
+            <div class="db-chips" id="dbChips"></div>
+        </div>
+    </nav>
+
+    <main class="content">
+
+        <!-- ================= 数据源纳管 ================= -->
+        <section class="view active" id="view-datasources">
+            <div class="view-head">
+                <div>
+                    <h1>数据源纳管</h1>
+                    <p class="sub">统一管理 Oracle / MySQL / PostgreSQL / SQL Server / KingbaseES 连接</p>
+                </div>
+                <button class="btn btn-primary" id="btnNewDs">+ 新建数据源</button>
+            </div>
+            <div class="card">
+                <table class="table" id="dsTable">
+                    <thead>
+                    <tr>
+                        <th>名称</th><th>类型</th><th>地址</th><th>数据库</th>
+                        <th>驱动版本</th><th>状态</th><th class="right">操作</th>
+                    </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div class="empty" id="dsEmpty" hidden>暂无数据源，点击右上角「新建数据源」开始</div>
+            </div>
+        </section>
+
+        <!-- ================= 驱动管理 ================= -->
+        <section class="view" id="view-drivers">
+            <div class="view-head">
+                <div>
+                    <h1>JDBC 驱动管理</h1>
+                    <p class="sub">
+                        目录约定 <code>drivers/&lt;db_type&gt;/&lt;version&gt;/&lt;jar&gt;</code> ·
+                        同一类型仅一个版本处于激活态
+                    </p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="btnScan">扫描驱动目录</button>
+                    <button class="btn btn-primary" id="btnUpload">上传 JAR</button>
+                </div>
+            </div>
+
+            <!-- 两栏：左 280px 库类型列表 / 右 该类型的驱动版本表（布局对齐 RaccoonX） -->
+            <div class="drivers-split">
+                <aside class="drivers-types-pane">
+                    <div class="drivers-pane-header">
+                        <span>数据库 / 产品类型</span>
+                        <span class="count" id="drvTypeCount"></span>
+                    </div>
+                    <div class="drivers-types-list" id="drvTypeList"></div>
+                </aside>
+
+                <div class="drivers-list-pane">
+                    <div class="drivers-pane-header">
+                        <span id="drvCurrentType">请选择左侧类型</span>
+                        <span class="drv-pane-note" id="drvCurrentNote"></span>
+                    </div>
+                    <div class="drivers-table-wrap">
+                        <table class="drivers-table">
+                            <thead>
+                            <tr>
+                                <th style="width:22%">驱动版本</th>
+                                <th style="width:30%">驱动类</th>
+                                <th>驱动 JAR 包</th>
+                                <th style="width:140px">操作</th>
+                            </tr>
+                            </thead>
+                            <tbody id="drvTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= SQL 编辑器 ================= -->
+        <section class="view" id="view-query">
+            <div class="view-head">
+                <div>
+                    <h1>SQL 编辑器</h1>
+                    <p class="sub">对已纳管数据源执行查询，自动记录执行历史</p>
+                </div>
+                <div class="head-actions">
+                    <select class="select" id="queryDsSelect"></select>
+                    <button class="btn btn-primary" id="btnRun">▶ 执行</button>
+                </div>
+            </div>
+            <div class="card editor-card">
+                <textarea id="sqlInput" spellcheck="false"
+                          placeholder="SELECT 1;&#10;&#10;-- 支持 SELECT / WITH / SHOW / DESC / EXPLAIN，也支持 DDL / DML"></textarea>
+            </div>
+            <div class="card result-card">
+                <div class="result-head">
+                    <span id="queryMeta">等待执行</span>
+                    <span class="badge badge-soft" id="queryTiming" hidden></span>
+                </div>
+                <div id="queryResult" class="result-body">
+                    <div class="empty">执行结果将显示在这里</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 巡检配置 ================= -->
+        <section class="view" id="view-inspection">
+            <div class="view-head">
+                <div>
+                    <h1>巡检配置</h1>
+                    <p class="sub">
+                        对齐 RaccoonX 巡检模型：<code>模板 → 章节 → 规则</code> 两级级联，
+                        变更留痕可回溯
+                    </p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="inspRefresh">刷新</button>
+                    <button class="btn btn-primary" id="btnNewTemplate">+ 新建模板</button>
+                </div>
+            </div>
+
+            <div class="stat-strip" id="inspStats"></div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="tpl">巡检模板</button>
+                <button class="tab" data-tab="hist">变更历史</button>
+            </div>
+
+            <!-- ---------- 巡检模板 ---------- -->
+            <div class="tab-pane active" id="pane-tpl">
+                <div class="split">
+                    <aside class="card">
+                        <div class="card-head">模板列表<span class="count" id="tplCount"></span></div>
+                        <div class="tpl-list" id="tplList"></div>
+                    </aside>
+                    <div id="tplDetail">
+                        <div class="card"><div class="empty">从左侧选择一个模板，查看其章节与巡检规则</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ---------- 变更历史 ---------- -->
+            <div class="tab-pane" id="pane-hist">
+                <div class="card">
+                    <div class="card-head">变更历史<span class="count" id="histCount"></span></div>
+                    <div id="histWrap"><div class="empty">加载中…</div></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 基线规则 ================= -->
+        <section class="view" id="view-baselines">
+            <div class="view-head">
+                <div>
+                    <h1>基线规则</h1>
+                    <p class="sub">
+                        按库类型维护 <code>参数 → 比较符 → 期望值</code> 阈值规则；
+                        巡检执行时采集实测值逐条判定，也可在此手工试算
+                    </p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="baseRefresh">刷新</button>
+                    <button class="btn btn-primary" id="btnNewBaseline">+ 新建基线</button>
+                </div>
+            </div>
+
+            <div class="stat-strip" id="baseStats"></div>
+
+            <div class="card" style="margin-bottom:16px">
+                <div class="base-toolbar">
+                    <select class="select" id="baseTypeSel"></select>
+                    <span class="count" id="baseCount"></span>
+                    <div class="spacer"></div>
+                    <button class="btn btn-sm" id="btnBaseEnableAll">全部启用</button>
+                    <button class="btn btn-sm" id="btnBaseDisableAll">全部停用</button>
+                </div>
+                <div id="baseTableWrap"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    基线试算
+                    <span class="count">在「实测值」列填入采集结果，未填写的参数将标记为「未采集」</span>
+                </div>
+                <div class="base-check-toolbar">
+                    <button class="btn btn-primary btn-sm" id="btnRunCheck">▶ 运行校验</button>
+                    <button class="btn btn-sm" id="btnFillDemo">填入示例值</button>
+                    <button class="btn btn-sm" id="btnClearValues">清空</button>
+                </div>
+                <div id="checkResultWrap">
+                    <div class="empty">点击「运行校验」查看合规率与逐项结论</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 巡检执行 ================= -->
+        <section class="view" id="view-inspectionRun">
+            <div class="view-head">
+                <div>
+                    <h1>巡检执行</h1>
+                    <p class="sub">
+                        选数据源 + 模板发起一次巡检：按章节顺序执行启用规则，采集基线值并逐条判定。
+                        结果落库后到「巡检历史」查看与导出
+                    </p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="runRefresh">刷新</button>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-head">发起巡检</div>
+                <div class="run-form">
+                    <label class="field">
+                        <span>数据源 <em>*</em></span>
+                        <select class="select" id="runDsSel"></select>
+                    </label>
+                    <label class="field">
+                        <span>巡检模板</span>
+                        <select class="select" id="runTplSel"></select>
+                    </label>
+                    <label class="field run-opt">
+                        <span>选项</span>
+                        <span class="run-checks">
+                            <label class="chk"><input type="checkbox" id="runOnlyEnabled" checked> 只跑启用项</label>
+                            <label class="chk"><input type="checkbox" id="runBaselines" checked> 含基线校验</label>
+                        </span>
+                    </label>
+                    <button class="btn btn-primary" id="btnRunInspection">▶ 开始巡检</button>
+                </div>
+                <div class="run-hint" id="runHint"></div>
+            </div>
+
+            <div id="runDetail">
+                <div class="card"><div class="empty">还没有执行记录。选好数据源与模板后点「开始巡检」。</div></div>
+            </div>
+        </section>
+
+        <!-- ================= 巡检历史 ================= -->
+        <section class="view" id="view-runs">
+            <div class="view-head">
+                <div>
+                    <h1>巡检历史</h1>
+                    <p class="sub">
+                        留痕每一次巡检执行 · 右侧在线预览报告原文，可按 Word / PDF / HTML 导出
+                    </p>
+                </div>
+                <div class="head-actions" id="reportDlBar">
+                    <button class="report-dl-btn dl-word" id="dlWord" disabled
+                            title="导出为可继续编辑的 Word 文档（.docx）">Word</button>
+                    <button class="report-dl-btn dl-pdf" id="dlPdf" disabled
+                            title="导出为 PDF（内嵌中文字体）">PDF</button>
+                    <button class="report-dl-btn dl-html" id="dlHtml" disabled
+                            title="下载自带样式的独立 HTML 报告">HTML</button>
+                </div>
+            </div>
+
+            <div class="runs-split">
+                <aside class="card runs-list-pane">
+                    <div class="card-head">执行记录<span class="count" id="runsCount"></span></div>
+                    <div class="runs-filter">
+                        <select class="select" id="runsDsFilter"></select>
+                        <select class="select" id="runsTypeFilter"></select>
+                    </div>
+                    <div class="run-list" id="runsList"><div class="empty">加载中…</div></div>
+                </aside>
+
+                <div class="runs-preview-pane">
+                    <div class="runs-preview-head">
+                        <span id="runsPreviewTitle">报告预览</span>
+                        <span class="runs-preview-actions">
+                            <span class="seg" id="runsPreviewMode">
+                                <button class="seg-btn active" data-pmode="report">报告原文</button>
+                                <button class="seg-btn" data-pmode="detail">结构化明细</button>
+                            </span>
+                            <a class="link" id="runsOpenTab" target="_blank" rel="noopener" hidden>在新标签打开 ↗</a>
+                        </span>
+                    </div>
+                    <div class="runs-preview-body">
+                        <iframe id="runsPreviewFrame" title="巡检报告在线预览" hidden></iframe>
+                        <div id="runsDetailWrap" class="runs-detail-wrap" hidden></div>
+                        <div class="empty" id="runsPreviewEmpty">
+                            从左侧选择一条执行记录，这里会显示完整报告
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- ================= 数据源表单弹窗 ================= -->
+<div class="modal-mask" id="dsModal" hidden>
+    <div class="modal">
+        <div class="modal-head">
+            <h2 id="dsModalTitle">新建数据源</h2>
+            <button class="icon-btn" data-close="dsModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="dsId">
+            <div class="grid-2">
+                <label class="field">
+                    <span>名称 <em>*</em></span>
+                    <input type="text" id="dsName" placeholder="如：生产库-核心">
+                </label>
+                <label class="field">
+                    <span>数据库类型 <em>*</em></span>
+                    <select id="dsType"></select>
+                </label>
+                <label class="field">
+                    <span>主机 <em>*</em></span>
+                    <input type="text" id="dsHost" placeholder="192.168.1.100">
+                </label>
+                <label class="field">
+                    <span>端口 <em>*</em></span>
+                    <input type="number" id="dsPort">
+                </label>
+                <label class="field">
+                    <span>用户名 <em>*</em></span>
+                    <input type="text" id="dsUser">
+                </label>
+                <label class="field">
+                    <span>密码 <em>*</em></span>
+                    <input type="password" id="dsPassword" placeholder="AES-256-GCM 加密存储">
+                </label>
+                <label class="field" id="fDatabase">
+                    <span>数据库 / Schema</span>
+                    <input type="text" id="dsDatabase">
+                </label>
+                <label class="field" id="fService" hidden>
+                    <span>Service Name</span>
+                    <input type="text" id="dsService" placeholder="ORCL">
+                </label>
+                <label class="field" id="fSid" hidden>
+                    <span>SID（与 Service Name 二选一）</span>
+                    <input type="text" id="dsSid" placeholder="ORCL">
+                </label>
+                <label class="field">
+                    <span>指定驱动版本</span>
+                    <input type="text" id="dsDriverVersion" placeholder="留空则用激活版本">
+                </label>
+            </div>
+            <label class="field">
+                <span>附加 JDBC 参数</span>
+                <input type="text" id="dsExtra" placeholder="如 useSSL=false&serverTimezone=UTC">
+            </label>
+            <div class="url-preview">
+                <span class="url-label">JDBC URL 预览</span>
+                <code id="dsUrlPreview">—</code>
+            </div>
+            <label class="field">
+                <span>备注</span>
+                <input type="text" id="dsNote">
+            </label>
+            <div class="test-result" id="dsTestResult" hidden></div>
+        </div>
+        <div class="modal-foot">
+            <button class="btn" id="btnTestDs">测试连接</button>
+            <div class="spacer"></div>
+            <button class="btn" data-close="dsModal">取消</button>
+            <button class="btn btn-primary" id="btnSaveDs">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 上传驱动弹窗 ================= -->
+<div class="modal-mask" id="upModal" hidden>
+    <div class="modal modal-sm">
+        <div class="modal-head">
+            <h2>上传 JDBC 驱动</h2>
+            <button class="icon-btn" data-close="upModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <label class="field">
+                <span>数据库类型 <em>*</em></span>
+                <select id="upType"></select>
+            </label>
+            <label class="field">
+                <span>驱动版本 <em>*</em></span>
+                <input type="text" id="upVersion" placeholder="如 8 / 8.0.33 / 42.7.13">
+            </label>
+            <label class="field">
+                <span>驱动类名</span>
+                <input type="text" id="upDriverClass" placeholder="留空则用类型默认值">
+            </label>
+            <label class="field">
+                <span>JAR 文件 <em>*</em></span>
+                <input type="file" id="upFile" accept=".jar">
+            </label>
+            <div class="hint" id="upPathHint"></div>
+        </div>
+        <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn" data-close="upModal">取消</button>
+            <button class="btn btn-primary" id="btnDoUpload">上传</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 巡检模板弹窗 ================= -->
+<div class="modal-mask" id="tplModal" hidden>
+    <div class="modal">
+        <div class="modal-head">
+            <h2 id="tplModalTitle">新建巡检模板</h2>
+            <button class="icon-btn" data-close="tplModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="tplId">
+            <div class="grid-2">
+                <label class="field">
+                    <span>数据库类型 <em>*</em></span>
+                    <select id="tplDbType"></select>
+                </label>
+                <label class="field">
+                    <span>版本号</span>
+                    <input type="text" id="tplVersion" placeholder="v1">
+                </label>
+                <label class="field">
+                    <span>模板名称（中文） <em>*</em></span>
+                    <input type="text" id="tplNameZh" placeholder="如：MySQL 默认巡检模板">
+                </label>
+                <label class="field">
+                    <span>模板名称（英文）</span>
+                    <input type="text" id="tplNameEn">
+                </label>
+            </div>
+            <label class="field">
+                <span>说明</span>
+                <input type="text" id="tplDesc" placeholder="适用范围与巡检维度概述">
+            </label>
+        </div>
+        <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn" data-close="tplModal">取消</button>
+            <button class="btn btn-primary" id="btnSaveTpl">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 巡检章节弹窗 ================= -->
+<div class="modal-mask" id="chModal" hidden>
+    <div class="modal modal-sm">
+        <div class="modal-head">
+            <h2 id="chModalTitle">新建章节</h2>
+            <button class="icon-btn" data-close="chModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="chId">
+            <input type="hidden" id="chTemplateId">
+            <div class="grid-2">
+                <label class="field">
+                    <span>章节序号 <em>*</em></span>
+                    <input type="number" id="chNumber" min="1">
+                </label>
+                <label class="field">
+                    <span>排序</span>
+                    <input type="number" id="chSort">
+                </label>
+            </div>
+            <label class="field">
+                <span>章节标题（中文） <em>*</em></span>
+                <input type="text" id="chTitleZh" placeholder="如：连接状态检查">
+            </label>
+            <label class="field">
+                <span>章节标题（英文）</span>
+                <input type="text" id="chTitleEn">
+            </label>
+            <label class="field">
+                <span>说明</span>
+                <input type="text" id="chDesc">
+            </label>
+            <label class="field">
+                <span>状态</span>
+                <select id="chEnabled">
+                    <option value="1">启用</option>
+                    <option value="0">停用</option>
+                </select>
+            </label>
+        </div>
+        <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn" data-close="chModal">取消</button>
+            <button class="btn btn-primary" id="btnSaveCh">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 巡检规则弹窗 ================= -->
+<div class="modal-mask" id="qModal" hidden>
+    <div class="modal">
+        <div class="modal-head">
+            <h2 id="qModalTitle">新建巡检规则</h2>
+            <button class="icon-btn" data-close="qModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="qId">
+            <input type="hidden" id="qChapterId">
+            <div class="grid-2">
+                <label class="field">
+                    <span>规则 Key <em>*</em></span>
+                    <input type="text" id="qKey" placeholder="如 mysql_connections">
+                </label>
+                <label class="field">
+                    <span>排序</span>
+                    <input type="number" id="qSort">
+                </label>
+            </div>
+            <label class="field">
+                <span>SQL 语句 <em>*</em></span>
+                <textarea id="qSql" class="sql-area" spellcheck="false"
+                          placeholder="SHOW GLOBAL STATUS LIKE 'Threads_connected';"></textarea>
+            </label>
+            <div class="grid-2">
+                <label class="field">
+                    <span>描述（中文）</span>
+                    <input type="text" id="qDescZh">
+                </label>
+                <label class="field">
+                    <span>描述（英文）</span>
+                    <input type="text" id="qDescEn">
+                </label>
+            </div>
+            <label class="field">
+                <span>状态</span>
+                <select id="qEnabled">
+                    <option value="1">启用</option>
+                    <option value="0">停用</option>
+                </select>
+            </label>
+        </div>
+        <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn" data-close="qModal">取消</button>
+            <button class="btn btn-primary" id="btnSaveQ">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 基线弹窗 ================= -->
+<div class="modal-mask" id="baseModal" hidden>
+    <div class="modal">
+        <div class="modal-head">
+            <h2 id="baseModalTitle">新建基线</h2>
+            <button class="icon-btn" data-close="baseModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="baseId">
+            <div class="grid-2">
+                <label class="field">
+                    <span>数据库类型 <em>*</em></span>
+                    <select id="baseDbType"></select>
+                </label>
+                <label class="field">
+                    <span>参数名 <em>*</em></span>
+                    <input type="text" id="baseParam" placeholder="如 FAILED_LOGIN_ATTEMPTS">
+                </label>
+                <label class="field">
+                    <span>比较符 <em>*</em></span>
+                    <select id="baseOp">
+                        <option>=</option><option>&gt;</option><option>&lt;</option>
+                        <option>&gt;=</option><option>&lt;=</option><option>!=</option>
+                        <option>BETWEEN</option><option>LIKE</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>风险等级 <em>*</em></span>
+                    <select id="baseRisk">
+                        <option>LOW</option><option>MEDIUM</option>
+                        <option>HIGH</option><option>CRITICAL</option>
+                    </select>
+                </label>
+                <label class="field" id="fExpected">
+                    <span>期望值</span>
+                    <input type="text" id="baseExpected" placeholder="如 5 / ENABLED / 128MB">
+                </label>
+                <label class="field" id="fRange" hidden>
+                    <span>期望区间（BETWEEN 用）</span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <input type="text" id="baseMin" placeholder="最小值">
+                        <span class="op-chip">~</span>
+                        <input type="text" id="baseMax" placeholder="最大值">
+                    </div>
+                </label>
+            </div>
+            <label class="field">
+                <span>采集 SQL</span>
+                <textarea id="baseSql" class="sql-area" spellcheck="false"
+                          placeholder="SELECT NAME, VALUE FROM V$PARAMETER WHERE NAME='failed_login_attempts'"></textarea>
+            </label>
+            <div class="grid-2">
+                <label class="field">
+                    <span>描述（中文）</span>
+                    <input type="text" id="baseDescZh">
+                </label>
+                <label class="field">
+                    <span>描述（英文）</span>
+                    <input type="text" id="baseDescEn">
+                </label>
+            </div>
+            <label class="field">
+                <span>状态</span>
+                <select id="baseEnabled">
+                    <option value="1">启用</option>
+                    <option value="0">停用</option>
+                </select>
+            </label>
+        </div>
+        <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn" data-close="baseModal">取消</button>
+            <button class="btn btn-primary" id="btnSaveBase">保存</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

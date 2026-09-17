@@ -1,0 +1,78 @@
+{
+  "_comment": "DB Navigator driver seed metadata (aligned with RaccoonX drivers_seed.json). No jar_path - resolved at import time by filename. Place JARs under drivers/<db_type>/<version>/. NOTE: the seed is imported ONLY when the registry table is empty. Declarative fields (note, driver_class) therefore only take effect on a fresh database - editing them here will not update an existing install. Observed fields (jar_path, file_size) ARE reconciled on every startup scan. To refresh declarative metadata, drop the jdbc_driver_registry table and restart.",
+  "exported_at": "2026-09-17T19:00:00",
+  "drivers": [
+    {
+      "db_type": "oracle",
+      "version": "8",
+      "driver_class": "oracle.jdbc.OracleDriver",
+      "jar_filename": "ojdbc8.jar",
+      "file_size": 4210517,
+      "is_active": 1,
+      "note": "Oracle 12c/19c/21c - ojdbc8 for JDK 8+"
+    },
+    {
+      "db_type": "oracle",
+      "version": "6",
+      "driver_class": "oracle.jdbc.OracleDriver",
+      "jar_filename": "ojdbc6.jar",
+      "file_size": 2739670,
+      "is_active": 0,
+      "note": "Oracle 11g R2 - ojdbc6 for JDK 6"
+    },
+    {
+      "db_type": "oracle",
+      "version": "19.20.0.0",
+      "driver_class": "oracle.jdbc.OracleDriver",
+      "jar_filename": "ojdbc11.jar",
+      "file_size": 5254720,
+      "is_active": 0,
+      "note": "Oracle 19c latest - ojdbc11 for JDK 11+"
+    },
+    {
+      "db_type": "mysql",
+      "version": "8.0.33",
+      "driver_class": "com.mysql.cj.jdbc.Driver",
+      "jar_filename": "mysql-connector-j-8.0.33.jar",
+      "file_size": 2481560,
+      "is_active": 1,
+      "note": "MySQL 5.7/8.0+ Connector/J 8.0.33"
+    },
+    {
+      "db_type": "mysql",
+      "version": "9.7.0",
+      "driver_class": "com.mysql.cj.jdbc.Driver",
+      "jar_filename": "mysql-connector-j-9.7.0.jar",
+      "file_size": 2607237,
+      "is_active": 0,
+      "note": "MySQL Connector/J 9.7.0 (latest)"
+    },
+    {
+      "db_type": "postgresql",
+      "version": "42.7.13",
+      "driver_class": "org.postgresql.Driver",
+      "jar_filename": "postgresql-42.7.13.jar",
+      "file_size": 1220948,
+      "is_active": 1,
+      "note": "PostgreSQL 10+ - JDBC 42.7.13"
+    },
+    {
+      "db_type": "sqlserver",
+      "version": "13.4.0.jre11",
+      "driver_class": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+      "jar_filename": "mssql-jdbc-13.4.0.jre11.jar",
+      "file_size": 1547706,
+      "is_active": 1,
+      "note": "SQL Server 2012+ - mssql-jdbc 13.4.0 (JRE 11+)"
+    },
+    {
+      "db_type": "kingbase",
+      "version": "9.0.0",
+      "driver_class": "com.kingbase8.Driver",
+      "jar_filename": "kingbase8-9.0.0.jar",
+      "file_size": 1217027,
+      "is_active": 1,
+      "note": "KingbaseES V8+ - kingbase8 JDBC 9.0.0"
+    }
+  ]
+}

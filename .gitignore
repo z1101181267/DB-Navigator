@@ -1,0 +1,53 @@
+# ---------- 构建产物 ----------
+target/
+*.class
+
+# ---------- 运行时数据（H2 / SQLite 元数据库，启动时自动重建） ----------
+data/
+*.mv.db
+*.trace.db
+*.db
+*.db-wal
+*.db-shm
+
+# ---------- 日志 ----------
+*.log
+logs/
+
+# ---------- JDBC 驱动 JAR ----------
+# 驱动不入库（体积大 + 分发许可）。目录结构与下载说明见各 drivers/<type>/README.md
+drivers/**/*.jar
+
+# ---------- Node（仅 dom_smoke.js 需要 jsdom 时产生） ----------
+node_modules/
+package-lock.json
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+
+# ---------- 临时草稿 ----------
+# 调试期的临时产物（curl 出来的 API 响应转储、一次性探针输出等）。
+# 不入库，但也不删——留着便于回头核对当时接口到底返回了什么。
+.scratch/
+
+# ---------- IDE ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 第三方源码快照 ----------
+# .reference/ 存 RaccoonX 的 index.html（约 1.4MB），仅用于对照布局，不参与构建。
+# 不入库：它是别人的产物，且体积大；需要时按 README 里的地址重新抓取即可。
+.reference/
