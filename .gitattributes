@@ -1,0 +1,35 @@
+# 统一换行符策略。
+#
+# 仓库内一律存 LF，检出时不强制转换（eol=lf）。
+# 理由：本项目同时有 Python（带 shebang 的脚本）、Java、JS，且开发机是 Windows、
+# 部署/CI 更可能在 Linux。若依赖各人本地的 core.autocrlf，同一份文件在不同机器上
+# 会反复产生「整文件都改了」的假 diff，review 时根本看不出真实改动。
+#
+# 仓库内已有的文件本来就是 LF，所以这条规则不会造成一次性的大规模重写。
+
+* text=auto eol=lf
+
+# Windows 批处理必须保留 CRLF，否则 cmd.exe 解析会出错。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制：禁止任何换行符转换（否则会损坏文件）
+*.jar   binary
+*.zip   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.docx  binary
+*.xlsx  binary
+*.pptx  binary
+*.ttf   binary
+*.ttc   binary
+*.woff  binary
+*.woff2 binary
+
+# 二进制也要标记出来，diff 时只报「Binary files differ」
+*.db    binary
+*.mv.db binary
