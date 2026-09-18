@@ -99,6 +99,13 @@ code, pre, textarea {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    /* 13 个入口分三组后内容高于一屏。把侧栏钉在视口内并定高，
+       由 .nav-scroll 内部滚动，底部的「纳管数据库」才不会被顶到可视区外
+       （.topbar 是 sticky top:0 且高 60px，所以这里从 60px 起） */
+    position: sticky;
+    top: 60px;
+    height: calc(100vh - 60px);
+    align-self: flex-start;
 }
 
 .nav-item {
@@ -118,6 +125,42 @@ code, pre, textarea {
 .nav-item:hover { background: var(--surface-2); }
 .nav-item.active { background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
 .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+
+/* ---------- 侧栏分组 ----------
+   13 个入口分三组后总高度会超过视口，所以让 .nav-scroll 自己滚，
+   .sidebar-foot（纳管数据库 chips）固定贴在底部不被挤走。 */
+.nav-scroll {
+    flex: 1;
+    min-height: 0;          /* 不写这条，flex 子项不肯收缩，overflow 不生效 */
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: -2px;           /* 抵消滚动条带来的 2px 视觉偏移 */
+    padding: 2px;
+}
+
+.nav-group-head {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    border: 0; border-radius: 7px;
+    background: transparent; cursor: pointer;
+    color: var(--text-muted);
+    font-family: inherit; font-size: 11.5px; font-weight: 620;
+    letter-spacing: .04em;
+    text-align: left;
+}
+.nav-group-head:hover { background: var(--surface-2); color: var(--text); }
+.nav-group-icon { font-size: 13px; width: 18px; text-align: center; }
+.nav-group-name { flex: 1; }
+.nav-caret { font-size: 10px; transition: transform .15s; }
+
+/* 收起态：只藏 body，标题行仍可点开 */
+.nav-group.collapsed .nav-group-body { display: none; }
+.nav-group.collapsed .nav-caret { transform: rotate(-90deg); }
+
+.nav-group-body { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
 
 .sidebar-foot {
     margin-top: auto;
@@ -205,6 +248,18 @@ code, pre, textarea {
 }
 .btn:hover { background: var(--surface-2); border-color: #b9c4d8; }
 .btn:active { transform: translateY(1px); }
+
+/* 禁用态：.btn-primary 的实心蓝在禁用时看着仍然可点，
+   而骨架页里「保存 / 测试连接」正需要一眼看出按不了 */
+.btn:disabled, .btn:disabled:hover {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none;
+}
+.btn-primary:disabled, .btn-primary:disabled:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+}
 
 .btn-primary {
     background: var(--primary);
@@ -873,3 +928,151 @@ input.rule-search { width: 240px; }
 .rb-actual { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
 .rb-msg { font-size: 12px; color: var(--text-muted); max-width: 420px; }
 .rb-row-fail td { background: #fff7f6; }
+
+/* ============================================================
+   概览 / 数据库统计 / 骨架页
+   ============================================================ */
+
+/* ---------- 能力边界提示 ----------
+   用于「后端还没接入」的页面。刻意用警示色而不是普通灰底：
+   它要让人一眼看出这不是功能坏了，而是本来就没做。 */
+.gap-note {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    border: 1px solid #f0dcb4;
+    border-radius: 8px;
+    background: var(--warn-soft);
+    color: #6b4406;
+    font-size: 12.5px;
+    line-height: 1.65;
+}
+.gap-note b { color: var(--warn); }
+.gap-note ul { margin: 6px 0 0; padding-left: 18px; }
+.gap-note code {
+    background: rgba(180, 83, 9, .1);
+    padding: 1px 5px; border-radius: 4px;
+    font-size: 11.5px;
+}
+/* 图标用 CSS 画，不用 emoji：⏳ 这类字符在本机字体栈里会渲染成豆腐块 */
+.gap-note .gap-icon {
+    flex: 0 0 auto;
+    width: 17px; height: 17px;
+    margin-top: 1px;
+    border-radius: 50%;
+    background: var(--warn);
+    color: #fff;
+    font-size: 12px; font-weight: 700;
+    line-height: 17px; text-align: center;
+}
+.gap-note .btn-link { padding: 0; font-size: 12.5px; }
+
+/* ---------- 手写条形图 ----------
+   不引图表库：前端零依赖、离线可用是硬约束，条形图用 CSS 足够 */
+.bars { display: flex; flex-direction: column; gap: 9px; }
+.bar-row {
+    display: grid;
+    grid-template-columns: 126px 1fr 96px;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+}
+.bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track {
+    height: 9px; border-radius: 5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+.bar-fill { display: block; height: 100%; border-radius: 4px; background: var(--primary); }
+.bar-fill.alt { background: #7c9cf5; }
+.bar-fill.warn { background: #f0a23c; }
+.bar-fill.ok { background: #43a867; }
+.bar-value { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.bar-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 11px; font-size: 12px; color: var(--text-muted); }
+.bar-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; }
+
+/* ---------- 风险四色块 ---------- */
+.risk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.risk-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--surface-2);
+}
+.risk-box .n { font-size: 20px; font-weight: 680; line-height: 1.2; }
+.risk-box .t { font-size: 12px; color: var(--text-muted); }
+.risk-box.critical .n { color: #b91c1c; }
+.risk-box.high .n { color: #ea580c; }
+.risk-box.medium .n { color: #b45309; }
+.risk-box.low .n { color: var(--success); }
+
+/* ---------- 实例选择列表（数据库管理左栏） ---------- */
+.pick-list { display: flex; flex-direction: column; }
+.pick-item {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit; font-size: 13px; color: var(--text);
+}
+.pick-item:last-child { border-bottom: 0; }
+.pick-item:hover { background: var(--surface-2); }
+.pick-item.active { background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
+.pick-main { flex: 1; min-width: 0; }
+.pick-main b {
+    display: block; font-size: 13px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pick-main small { font-size: 11.5px; color: var(--text-muted); font-weight: 400; }
+
+/* ---------- 键值信息表 ---------- */
+.kv { display: grid; grid-template-columns: 108px 1fr; gap: 8px 14px; margin: 0; font-size: 12.5px; }
+.kv dt { color: var(--text-muted); }
+.kv dd { margin: 0; word-break: break-all; }
+.kv dd.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 12px; }
+
+/* ---------- 常用入口 ---------- */
+.quick-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.quick-link {
+    flex: 1 1 168px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-2);
+    padding: 9px 12px;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    color: var(--text);
+}
+.quick-link:hover { border-color: var(--border-strong); background: var(--surface); }
+.quick-link b { display: block; font-size: 12.5px; font-weight: 620; }
+.quick-link small { font-size: 11.5px; color: var(--text-muted); }
+
+/* ---------- 计划能力清单 ---------- */
+.plan-list { display: flex; flex-direction: column; gap: 11px; }
+.plan-item { border-left: 2px solid var(--border-strong); padding-left: 10px; }
+.plan-item strong { display: block; font-size: 13px; font-weight: 620; }
+.plan-item span { font-size: 12.5px; color: var(--text-muted); }
+
+/* ---------- 插件卡片网格 ---------- */
+.plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.plugin-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    padding: 13px 15px;
+    box-shadow: var(--shadow);
+}
+.plugin-card .pc-name { font-size: 13.5px; font-weight: 620; }
+.plugin-card .pc-desc { font-size: 12px; color: var(--text-muted); margin-top: 4px; }

@@ -53,6 +53,30 @@ const state = {
         filterType: '',    // '' = 全部库类型
         previewMode: 'report',   // 'report' = 报告原文(iframe) | 'detail' = 结构化明细
         lastRunId: null    // 巡检执行页当前展示的那条
+    },
+    // 大屏展示 › 概览
+    overview: {
+        loaded: false,
+        summary: null,
+        runs: []
+    },
+    // 数据库运维 › 数据库管理
+    dbmgmt: {
+        loaded: false,
+        activeId: null,
+        test: null         // 当前实例的连接测试结果
+    },
+    // 数据库运维 › 数据库统计
+    dbStats: {
+        loaded: false,
+        summary: null,
+        ruleStats: null,
+        runs: []
+    },
+    // 数据库运维 › 定时巡检（调度器未接入，只读执行记录）
+    schedules: {
+        loaded: false,
+        runs: []
     }
 };
 
@@ -127,6 +151,9 @@ async function boot() {
     fillTypeSelects();
     await Promise.all([loadDatasources(), loadDrivers()]);
     bindEvents();
+
+    // 首屏落在「概览」上，直接加载；它挂了不影响其它页面
+    ensureOverview();
 }
 
 function setMode(mode, label) {
@@ -186,6 +213,9 @@ function bindEvents() {
         btn.addEventListener('click', () => switchView(btn.dataset.view));
     });
 
+    // 侧栏分组：标题行点击收起 / 展开
+    bindNavGroups();
+
     document.querySelectorAll('[data-close]').forEach(btn => {
         btn.addEventListener('click', () => closeModal(btn.dataset.close));
     });
@@ -226,6 +256,11 @@ function bindEvents() {
     // 巡检历史
     bindRunHistoryEvents();
 
+    // 概览 / 数据库管理 / 数据库统计的刷新按钮
+    $('btnOvRefresh').addEventListener('click', () => ensureOverview(true));
+    $('btnDbRefresh').addEventListener('click', () => ensureDatabases(true));
+    $('btnStatRefresh').addEventListener('click', () => ensureDbStats(true));
+
     // Close modal on mask click
     document.querySelectorAll('.modal-mask').forEach(mask => {
         mask.addEventListener('click', (e) => { if (e.target === mask) mask.hidden = true; });
@@ -235,6 +270,12 @@ function bindEvents() {
 function switchView(name) {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === name));
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+    // 目标项可能在收起的分组里，先展开再谈高亮
+    expandNavGroup(name);
+    if (name === 'overview') ensureOverview();
+    if (name === 'databases') ensureDatabases();
+    if (name === 'dbStats') ensureDbStats();
+    if (name === 'schedules') ensureSchedules();
     if (name === 'query') renderQueryDsSelect();
     if (name === 'inspection') ensureInspection();
     if (name === 'baselines') ensureBaselines();
@@ -2917,6 +2958,471 @@ async function startRun() {
         btn.disabled = false;
         btn.textContent = '▶ 开始巡检';
     }
+}
+
+/* ============================================================
+   侧栏分组：大屏展示 / 数据库运维 / 配置与管理
+   ============================================================ */
+
+/* 视图 → 所属分组。切换视图时用它自动展开分组：
+   否则分组是收起的，高亮项藏在里面，点了菜单看起来像没反应 */
+const NAV_GROUP_OF = {
+    overview: 'screen',
+    databases: 'ops', dbStats: 'ops', schedules: 'ops',
+    inspectionRun: 'ops', runs: 'ops', query: 'ops',
+    datasources: 'config', drivers: 'config', inspection: 'config',
+    baselines: 'config', rules: 'config', plugins: 'config', aiConfig: 'config'
+};
+
+function bindNavGroups() {
+    document.querySelectorAll('.nav-group-head').forEach(head => {
+        head.addEventListener('click', () => head.closest('.nav-group').classList.toggle('collapsed'));
+    });
+    bindGotoButtons(document);
+}
+
+/** 页内「去 XX」跳转按钮。动态渲染出来的内容要再调一次，见各渲染函数 */
+function bindGotoButtons(root) {
+    root.querySelectorAll('[data-goto]').forEach(btn => {
+        btn.addEventListener('click', () => switchView(btn.dataset.goto));
+    });
+}
+
+function expandNavGroup(name) {
+    const g = NAV_GROUP_OF[name];
+    if (!g) return;
+    const el = document.querySelector(`.nav-group[data-group="${g}"]`);
+    if (el) el.classList.remove('collapsed');
+}
+
+/** 风险等级的中文说法。接口里给的是英文枚举，界面上只出现英文太生硬 */
+const RISK_LABEL_ZH = {
+    CRITICAL: '严重', HIGH: '高风险', MEDIUM: '中风险', LOW: '低风险', UNKNOWN: '未分级'
+};
+
+/* ============================================================
+   概览（大屏展示）
+   ============================================================ */
+
+async function ensureOverview(force) {
+    if (state.overview.loaded && !force) return;
+    await loadOverview();
+}
+
+async function loadOverview() {
+    try {
+        const [summary, runs] = await Promise.all([
+            api('/api/inspection/summary'),
+            api('/api/inspection/runs')
+        ]);
+        state.overview.summary = summary;
+        state.overview.runs = runs || [];
+        state.overview.loaded = true;
+        renderOverview();
+    } catch (e) {
+        state.overview.loaded = false;
+        $('ovStats').innerHTML = '';
+        const msg = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+        $('ovAssetChart').innerHTML = msg;
+        $('ovRiskChart').innerHTML = msg;
+        $('ovRuns').innerHTML = msg;
+        toast('概览加载失败：' + e.message, 'bad');
+    }
+}
+
+function renderOverview() {
+    const s = state.overview.summary || {};
+    const byType = s.byDbType || [];
+    const risk = s.baselineRiskDistribution || {};
+    const riskTotal = INSP_RISKS.reduce((n, k) => n + (risk[k] || 0), 0);
+    const runs = state.overview.runs;
+    const last = runs[0] || null;
+
+    const dsTypes = new Set((state.datasources || []).map(d => d.dbType));
+    const drvOk = (state.drivers || []).filter(d => d.active && d.jarPresent !== false).length;
+
+    $('ovStats').innerHTML = [
+        { n: state.datasources.length, label: '纳管数据源', sub: `${dsTypes.size} 种库类型` },
+        { n: drvOk, label: '可用驱动', sub: `共登记 ${state.drivers.length} 个版本` },
+        { n: s.templateCount || 0, label: '巡检模板', sub: `${s.totalChapters || 0} 个章节` },
+        { n: s.totalRules || 0, label: '规则库', sub: `${s.totalBindings || 0} 处章节引用` },
+        { n: riskTotal, label: '基线规则', sub: `覆盖 ${Object.keys(s.baselineCountByType || {}).length} 种库类型` },
+        { n: runs.length, label: '巡检执行', sub: last ? `最近 ${shortTime(last.startedAt)}` : '尚未执行' }
+    ].map(c => `
+        <div class="stat-card">
+            <div class="stat-num">${esc(c.n)}</div>
+            <div class="stat-label">${esc(c.label)}</div>
+            <div class="stat-sub">${esc(c.sub)}</div>
+        </div>`).join('');
+
+    // 各库类型资产：条形长度按规则数归一，右侧同时给出章节数（两者口径不同，不叠在一条上）
+    $('ovAssetHint').textContent = `共 ${s.totalRules || 0} 条规则 · ${s.totalChapters || 0} 个章节`;
+    const maxRules = Math.max(1, ...byType.map(t => t.rules || 0));
+    $('ovAssetChart').innerHTML = byType.length
+        ? `<div class="bars">${byType.map(t => {
+            const meta = typeMeta(t.dbType);
+            const pct = Math.round((t.rules || 0) / maxRules * 100);
+            return `
+                <div class="bar-row">
+                    <span class="bar-name">${esc(meta.emoji || '')} ${esc(meta.label || t.dbType)}</span>
+                    <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+                    <span class="bar-value">${esc(t.rules || 0)} 规则 · ${esc(t.chapters || 0)} 章</span>
+                </div>`;
+        }).join('')}</div>`
+        : '<div class="empty">暂无巡检配置</div>';
+
+    // 风险分布：按严重程度从高到低排，最该被看到的排最前
+    $('ovRiskChart').innerHTML = `
+        <div class="risk-grid">
+            ${INSP_RISKS.slice().reverse().map(k => `
+                <div class="risk-box ${esc(k.toLowerCase())}">
+                    <div class="n">${esc(risk[k] || 0)}</div>
+                    <div class="t">${esc(RISK_LABEL_ZH[k] || k)} · ${esc(k)}</div>
+                </div>`).join('')}
+        </div>
+        <div class="bar-legend" style="margin:12px 0 0">
+            <span>合计 ${riskTotal} 条基线规则</span>
+        </div>`;
+
+    $('ovRuns').innerHTML = runs.length ? `
+        <table class="table">
+            <thead>
+                <tr><th>时间</th><th>数据源</th><th>状态</th><th class="right">合规率</th></tr>
+            </thead>
+            <tbody>
+                ${runs.slice(0, 5).map(r => `
+                    <tr>
+                        <td>${esc(shortTime(r.startedAt))}</td>
+                        <td>${esc(r.dataSourceName || '—')}</td>
+                        <td>${esc(RUN_STATUS_LABEL[r.status] || r.status || '—')}</td>
+                        <td class="right">${r.compliancePct === null || r.compliancePct === undefined
+                            ? '—' : esc(r.compliancePct) + '%'}</td>
+                    </tr>`).join('')}
+            </tbody>
+        </table>`
+        : '<div class="empty">还没有巡检执行记录，去「巡检执行」发起一次</div>';
+
+    $('ovLinks').innerHTML = `<div class="quick-links">${[
+        { v: 'inspectionRun', t: '发起巡检', d: '选数据源与模板立即执行' },
+        { v: 'runs', t: '巡检历史', d: '看报告、导出 HTML / Word / PDF' },
+        { v: 'databases', t: '数据库管理', d: '实例连通性与对象浏览' },
+        { v: 'query', t: 'SQL 编辑器', d: '直接查库' },
+        { v: 'datasources', t: '数据源纳管', d: '新增或修改连接' },
+        { v: 'rules', t: '规则引擎', d: '维护规则库、单条试跑' }
+    ].map(l => `
+        <button class="quick-link" data-goto="${esc(l.v)}">
+            <b>${esc(l.t)}</b><small>${esc(l.d)}</small>
+        </button>`).join('')}</div>`;
+    bindGotoButtons($('ovLinks'));
+}
+
+/* ============================================================
+   数据库管理（数据库运维）
+   运维视角，与「配置与管理 › 数据源纳管」的登记视角区分开：
+   这里只读实例信息 + 做连接测试，改参数回纳管页
+   ============================================================ */
+
+async function ensureDatabases(force) {
+    if (state.dbmgmt.loaded && !force) return;
+    // 复用既有加载逻辑：顺带把「数据源纳管」页与 SQL 编辑器的下拉一起刷新
+    await loadDatasources();
+    if (!state.datasources.some(d => d.id === state.dbmgmt.activeId)) {
+        state.dbmgmt.activeId = state.datasources.length ? state.datasources[0].id : null;
+        state.dbmgmt.test = null;
+    }
+    state.dbmgmt.loaded = true;
+    renderDbInstList();
+    renderDbInfo();
+}
+
+function renderDbInstList() {
+    const list = state.datasources || [];
+    $('dbInstCount').textContent = list.length + ' 个';
+
+    if (!list.length) {
+        $('dbInstList').innerHTML = '<div class="empty">还没有纳管实例，去「数据源纳管」新建一个</div>';
+        return;
+    }
+
+    $('dbInstList').innerHTML = `<div class="pick-list">${list.map(d => {
+        const meta = typeMeta(d.dbType);
+        const addr = d.host ? esc(d.host) + (d.port ? ':' + esc(d.port) : '') : '—';
+        return `
+            <button class="pick-item${d.id === state.dbmgmt.activeId ? ' active' : ''}" data-inst="${esc(d.id)}">
+                <span class="nav-icon">${esc(meta.emoji || '🗄')}</span>
+                <span class="pick-main">
+                    <b>${esc(d.name)}</b>
+                    <small>${esc(meta.label || d.dbType)} · ${addr}</small>
+                </span>
+            </button>`;
+    }).join('')}</div>`;
+
+    $('dbInstList').querySelectorAll('[data-inst]').forEach(b => b.addEventListener('click', () => {
+        state.dbmgmt.activeId = Number(b.dataset.inst);
+        state.dbmgmt.test = null;       // 换实例就把上一条的测试结果丢掉，免得张冠李戴
+        renderDbInstList();
+        renderDbInfo();
+    }));
+}
+
+function renderDbInfo() {
+    const d = (state.datasources || []).find(x => x.id === state.dbmgmt.activeId);
+    if (!d) {
+        $('dbInfoHint').textContent = '未选择';
+        $('dbInfo').innerHTML = '<div class="empty">从左侧选择一个实例</div>';
+        return;
+    }
+
+    const meta = typeMeta(d.dbType);
+    const t = state.dbmgmt.test;
+    $('dbInfoHint').textContent = `${meta.label || d.dbType} · ${d.status === 'ONLINE' ? '在线' : (d.status || '未知')}`;
+
+    $('dbInfo').innerHTML = `
+        <div class="card-body-pad">
+            <dl class="kv">
+                <dt>实例名称</dt><dd>${esc(d.name)}</dd>
+                <dt>库类型</dt><dd>${esc(meta.emoji || '')} ${esc(meta.label || d.dbType)}</dd>
+                <dt>地址</dt><dd class="mono">${esc(d.host || '—')}${d.port ? ':' + esc(d.port) : ''}</dd>
+                <dt>库 / 服务</dt><dd class="mono">${esc(d.databaseName || d.serviceName || d.sid || '—')}</dd>
+                <dt>用户名</dt><dd class="mono">${esc(d.username || '—')}</dd>
+                <dt>连接状态</dt><dd>${d.status === 'ONLINE'
+                    ? '<span class="badge badge-ok">在线</span>'
+                    : `<span class="badge badge-soft">${esc(d.status || '未知')}</span>`}</dd>
+                <dt>最近连通</dt><dd>${esc(shortTime(d.lastConnected))}</dd>
+                <dt>驱动版本</dt><dd class="mono">${esc(d.driverVersion || '自动选择')}</dd>
+                <dt>备注</dt><dd>${esc(d.note || '—')}</dd>
+            </dl>
+            <div class="base-check-toolbar" style="margin-top:14px">
+                <button class="btn btn-sm" id="btnDbTest">测试连接</button>
+                <button class="btn btn-sm" data-goto="query">去 SQL 编辑器</button>
+                <button class="btn btn-sm" data-goto="datasources">改连接参数</button>
+                <span class="count" id="dbTestOut"></span>
+            </div>
+            ${t ? `<div id="dbTestBox" class="test-result ${t.success ? 'ok' : 'bad'}" style="margin-top:12px">
+                ${t.success
+                    ? `✔ 连接成功（${esc(t.elapsedMs)} ms）<br>`
+                      + `驱动版本：<code>${esc(t.driverVersion || '—')}</code><br>`
+                      + `产品：<code>${esc(t.databaseProductName || '—')} ${esc(t.databaseProductVersion || '')}</code>`
+                    : `✘ 连接失败<br>${esc(t.error || '未知错误')}`}
+            </div>` : ''}
+        </div>`;
+
+    $('btnDbTest').addEventListener('click', () => testDbInstance(d.id));
+    bindGotoButtons($('dbInfo'));
+    if (t) $('dbTestOut').textContent = t.success ? '连通' : '不通';
+}
+
+async function testDbInstance(id) {
+    const btn = $('btnDbTest');
+    const out = $('dbTestOut');
+    btn.disabled = true;
+    out.textContent = '测试中…';
+    try {
+        const r = await api(`/api/datasources/${id}/test`, { method: 'POST' });
+        state.dbmgmt.test = r;
+        // 测试会更新 lastConnected / status，重新拉一次列表让左栏与信息卡同步
+        await loadDatasources();
+        renderDbInstList();
+        renderDbInfo();
+        toast(r.success ? `连接成功（${r.elapsedMs} ms）` : '连接失败：' + (r.error || ''), r.success ? 'ok' : 'bad');
+    } catch (e) {
+        out.textContent = '测试失败';
+        toast('连接测试失败：' + e.message, 'bad');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+/* ============================================================
+   数据库统计（数据库运维）
+   全部来自现有接口的真实数据，不做任何推算
+   ============================================================ */
+
+async function ensureDbStats(force) {
+    if (state.dbStats.loaded && !force) return;
+    await loadDbStats();
+}
+
+async function loadDbStats() {
+    try {
+        const [summary, ruleStats, runs] = await Promise.all([
+            api('/api/inspection/summary'),
+            api('/api/inspection/rules/stats'),
+            api('/api/inspection/runs')
+        ]);
+        state.dbStats.summary = summary;
+        state.dbStats.ruleStats = ruleStats;
+        state.dbStats.runs = runs || [];
+        state.dbStats.loaded = true;
+        renderDbStats();
+    } catch (e) {
+        state.dbStats.loaded = false;
+        ['statByType', 'statBaseline', 'statRuleState', 'statCategory', 'statRuns']
+            .forEach(id => { $(id).innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`; });
+        toast('统计加载失败：' + e.message, 'bad');
+    }
+}
+
+function renderDbStats() {
+    const s = state.dbStats.summary || {};
+    const rs = state.dbStats.ruleStats || {};
+    const runs = state.dbStats.runs;
+    const byType = s.byDbType || [];
+    const baseByType = s.baselineCountByType || {};
+    const risk = s.baselineRiskDistribution || {};
+    const riskTotal = INSP_RISKS.reduce((n, k) => n + (risk[k] || 0), 0);
+
+    const okRuns = runs.filter(r => r.status === 'SUCCESS').length;
+    const avgCompliance = runs.length
+        ? Math.round(runs.reduce((n, r) => n + (r.compliancePct || 0), 0) / runs.length * 10) / 10
+        : null;
+
+    $('statStats').innerHTML = [
+        { n: rs.total || 0, label: '规则库', sub: `启用 ${rs.enabled || 0} · 停用 ${rs.disabled || 0}` },
+        { n: s.totalChapters || 0, label: '章节', sub: `${s.templateCount || 0} 个模板` },
+        { n: s.totalBindings || 0, label: '章节引用', sub: `未绑定规则 ${rs.unbound || 0} 条` },
+        { n: riskTotal, label: '基线规则', sub: `严重 ${risk.CRITICAL || 0} · 高 ${risk.HIGH || 0}` },
+        { n: runs.length, label: '巡检执行', sub: `成功 ${okRuns} 次` },
+        { n: avgCompliance === null ? '—' : avgCompliance + '%', label: '平均合规率',
+          sub: runs.length ? `基于 ${runs.length} 次执行` : '尚无执行记录' }
+    ].map(c => `
+        <div class="stat-card">
+            <div class="stat-num">${esc(c.n)}</div>
+            <div class="stat-label">${esc(c.label)}</div>
+            <div class="stat-sub">${esc(c.sub)}</div>
+        </div>`).join('');
+
+    $('statByType').innerHTML = barChart(
+        byType.map(t => ({
+            name: `${typeMeta(t.dbType).emoji || ''} ${typeMeta(t.dbType).label || t.dbType}`,
+            value: t.rules || 0,
+            text: `${t.rules || 0} 规则 · ${t.chapters || 0} 章`
+        })),
+        '暂无巡检配置');
+
+    $('statBaseline').innerHTML = barChart(
+        Object.keys(baseByType).map(k => ({
+            name: `${typeMeta(k).emoji || ''} ${typeMeta(k).label || k}`,
+            value: baseByType[k] || 0,
+            text: `${baseByType[k] || 0} 条`,
+            cls: 'alt'
+        })),
+        '暂无基线规则');
+
+    const enabled = rs.enabled || 0, disabled = rs.disabled || 0, unbound = rs.unbound || 0;
+    $('statRuleStateHint').textContent = `共 ${rs.total || 0} 条`;
+    $('statRuleState').innerHTML = barChart([
+        { name: '已启用', value: enabled, text: `${enabled} 条`, cls: 'ok' },
+        { name: '已停用', value: disabled, text: `${disabled} 条`, cls: 'warn' },
+        { name: '未被引用', value: unbound, text: `${unbound} 条`, cls: 'alt' }
+    ], '暂无规则');
+
+    const cats = Object.entries(rs.byCategory || {}).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    $('statCategory').innerHTML = barChart(
+        cats.map(([k, v]) => ({ name: k, value: v, text: `${v} 条` })),
+        '暂无归类');
+
+    // 按日聚合：用执行时间的前 10 位（YYYY-MM-DD），两侧实现的时间格式都能截出日期
+    const byDay = {};
+    runs.forEach(r => {
+        const day = String(r.startedAt || '').slice(0, 10);
+        if (!day) return;
+        (byDay[day] = byDay[day] || []).push(r);
+    });
+    const days = Object.keys(byDay).sort().slice(-7);
+    $('statRunHint').textContent = days.length ? `最近 ${days.length} 天` : '尚无执行记录';
+    $('statRuns').innerHTML = days.length
+        ? barChart(days.map(d => {
+            const list = byDay[d];
+            const avg = Math.round(list.reduce((n, r) => n + (r.compliancePct || 0), 0) / list.length * 10) / 10;
+            return { name: d, value: list.length, text: `${list.length} 次 · 合规 ${avg}%` };
+        }), '')
+        : '<div class="empty">还没有巡检执行记录</div>';
+}
+
+/** 手写条形图。max 取本组最大值做归一，不跨图比较 */
+function barChart(rows, emptyText) {
+    if (!rows.length) return `<div class="empty">${esc(emptyText || '暂无数据')}</div>`;
+    const max = Math.max(1, ...rows.map(r => r.value || 0));
+    return `<div class="bars">${rows.map(r => `
+        <div class="bar-row">
+            <span class="bar-name" title="${esc(r.name)}">${esc(r.name)}</span>
+            <span class="bar-track"><span class="bar-fill ${esc(r.cls || '')}" style="width:${Math.round((r.value || 0) / max * 100)}%"></span></span>
+            <span class="bar-value">${esc(r.text === undefined ? r.value : r.text)}</span>
+        </div>`).join('')}</div>`;
+}
+
+/* ============================================================
+   定时巡检（数据库运维）
+   调度器尚未接入：页面只展示真实存在的部分（执行记录的触发方式），
+   任务表保持空态，新建按钮禁用 —— 不伪造任务列表
+   ============================================================ */
+
+async function ensureSchedules(force) {
+    if (state.schedules.loaded && !force) return;
+    try {
+        state.schedules.runs = await api('/api/inspection/runs') || [];
+        state.schedules.loaded = true;
+    } catch (e) {
+        state.schedules.runs = [];
+        state.schedules.loaded = false;
+        toast('执行记录加载失败：' + e.message, 'bad');
+    }
+    renderSchedules();
+}
+
+function renderSchedules() {
+    const runs = state.schedules.runs;
+    const byTrigger = {};
+    runs.forEach(r => {
+        const k = r.triggerSource || 'UNKNOWN';
+        byTrigger[k] = (byTrigger[k] || 0) + 1;
+    });
+    const manual = byTrigger.MANUAL || 0;
+    const scheduled = byTrigger.SCHEDULED || 0;
+
+    $('schedStats').innerHTML = [
+        { n: 0, label: '定时任务', sub: '调度器尚未接入' },
+        { n: scheduled, label: '定时触发执行', sub: '来自执行记录的 triggerSource' },
+        { n: manual, label: '手动触发执行', sub: '控制台点「开始巡检」' },
+        { n: runs.length, label: '执行记录总数', sub: runs.length ? `最近 ${shortTime(runs[0].startedAt)}` : '尚无记录' }
+    ].map(c => `
+        <div class="stat-card">
+            <div class="stat-num">${esc(c.n)}</div>
+            <div class="stat-label">${esc(c.label)}</div>
+            <div class="stat-sub">${esc(c.sub)}</div>
+        </div>`).join('');
+
+    $('schedTableWrap').innerHTML = `
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>任务名</th><th>目标数据源</th><th>巡检模板</th>
+                    <th>周期</th><th>上次执行</th><th>状态</th><th class="right">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="7">
+                    <div class="empty">还没有定时任务。定时任务表与调度线程尚未接入，无法新建</div>
+                </td></tr>
+            </tbody>
+        </table>`;
+
+    const TRIGGER_LABEL = { MANUAL: '手动触发', SCHEDULED: '定时触发', UNKNOWN: '未知来源' };
+    $('schedTriggerHint').textContent = `共 ${runs.length} 条执行记录`;
+    $('schedTriggerWrap').innerHTML = runs.length
+        ? barChart(
+            Object.keys(byTrigger).sort().map(k => ({
+                name: TRIGGER_LABEL[k] || k,
+                value: byTrigger[k],
+                text: `${byTrigger[k]} 次`,
+                cls: k === 'SCHEDULED' ? 'ok' : 'alt'
+            })),
+            '')
+          + `<div class="bar-legend" style="margin:12px 0 0">
+                <span>定时触发为 0 是预期结果：调度器还没接，记录只可能由控制台手动产生</span>
+             </div>`
+        : '<div class="empty">还没有执行记录</div>';
 }
 
 /* ---------------- start ---------------- */

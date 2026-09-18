@@ -9,13 +9,17 @@
    本脚本用 Node 22 内置的 WebSocket 直连 CDP，不安装 playwright/puppeteer。
    它做的是 jsdom 做不到的事：真实布局（getBoundingClientRect）+ 真实 CSS 级联。
 
-   覆盖的缺陷类型（都属于「元素该藏起来却显示」）：
+   覆盖的缺陷类型（都属于「元素该藏起来却显示」或「该显示却塌了」）：
      1. 首屏七个弹窗因 .modal-mask{display:flex} 覆盖 hidden 而全部常显并堆叠
      2. SQL 编辑器的耗时徽标 .badge{display:inline-block} 空徽标常显
      3. 弹窗内条件字段（.field{display:flex}）不随下拉切换显隐
         - 基线弹窗：BETWEEN 区间字段
         - 数据源弹窗：Oracle 专属的 SID / Service Name
-     4. 视图互斥：切到规则引擎后，巡检配置管理 / 基线配置管理必须不可见
+     4. 视图互斥：切到某个视图后，其余 13 个视图必须全部不可见
+     5. 侧栏分组：收起后 .nav-group-body 必须真的不占位；
+        侧栏内容高于一屏时底部 chips 不能被顶出可视区
+     6. 条形图：.bar-fill 是 inline span，没有 display:block 就撑不出宽度，
+        会静默塌成 0px（jsdom 算不出布局，只有真浏览器能发现）
 
    用法：
      node scripts/ui_guard.js
@@ -506,6 +510,162 @@ async function waitReady(cdp, timeout = 20000) {
         await sleep(900);
         const backToReport = await evaluate(cdp, `${VIS_HELPER} return vis('#runsPreviewFrame');`);
         check(`切回报告原文后 iframe 复现（${backToReport}）`, backToReport === 'visible', backToReport);
+
+        /* ---- 8. 侧栏三分组：折叠、滚动与真实几何 ---- */
+        console.log();
+        console.log('── 侧栏三分组：折叠与几何 ──');
+        await evaluate(cdp, `switchView('overview'); return true;`);
+        await sleep(900);
+
+        const navGeo = await evaluate(cdp, `
+            const sb = document.querySelector('.sidebar');
+            const scroll = document.querySelector('.nav-scroll');
+            const groups = [...document.querySelectorAll('.nav-group')];
+            const bodies = groups.map(g => g.querySelector('.nav-group-body'));
+            const foot = document.querySelector('.sidebar-foot');
+            return {
+                groupCount: groups.length,
+                names: groups.map(g => g.querySelector('.nav-group-name').textContent.trim()),
+                itemCount: document.querySelectorAll('.nav-item').length,
+                // 分组标题必须真的占位（不是被挤到视口外）
+                headsVisible: groups.filter(g => {
+                    const r = g.querySelector('.nav-group-head').getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                }).length,
+                // 同组内所有导航项左边界应一致（图标列对齐）
+                aligned: groups.every(g => {
+                    const xs = [...g.querySelectorAll('.nav-item')]
+                        .map(i => Math.round(i.getBoundingClientRect().x));
+                    return xs.every(x => Math.abs(x - xs[0]) <= 1);
+                }),
+                bodyHeights: bodies.map(b => Math.round(b.getBoundingClientRect().height)),
+                scrollOverflow: getComputedStyle(scroll).overflowY,
+                footBottom: Math.round(foot.getBoundingClientRect().bottom),
+                winH: window.innerHeight
+            };
+        `);
+        check(`侧栏 3 个分组（${navGeo.names.join(' / ')}）`,
+            navGeo.groupCount === 3, JSON.stringify(navGeo.names));
+        check(`分组共 14 个导航入口（实际 ${navGeo.itemCount}）`,
+            navGeo.itemCount === 14, navGeo.itemCount);
+        check(`三个分组标题都真实可见（${navGeo.headsVisible}/3）`,
+            navGeo.headsVisible === 3, navGeo.headsVisible);
+        check(`同组内导航项左边界对齐`, navGeo.aligned === true, String(navGeo.aligned));
+        check(`分组内容默认展开（各 body 高度 ${navGeo.bodyHeights.join(',')}）`,
+            navGeo.bodyHeights.every(h => h > 0), JSON.stringify(navGeo.bodyHeights));
+        check(`侧栏内容区可内部滚动（overflow-y=${navGeo.scrollOverflow}）`,
+            navGeo.scrollOverflow === 'auto' || navGeo.scrollOverflow === 'scroll',
+            navGeo.scrollOverflow);
+        // 13 项分三组后内容高于一屏，若不把侧栏定高，底部 chips 会被顶出可视区
+        check(`底部「纳管数据库」仍在视口内（bottom=${navGeo.footBottom} <= ${navGeo.winH}）`,
+            navGeo.footBottom <= navGeo.winH + 1, JSON.stringify(navGeo));
+
+        // 收起：body 必须真的不占位，而不是只加了个 class
+        await evaluate(cdp, `
+            document.querySelector('.nav-group[data-group="ops"] .nav-group-head').click();
+            return true;
+        `);
+        await sleep(400);
+        const collapsedGeo = await evaluate(cdp, `
+            const g = document.querySelector('.nav-group[data-group="ops"]');
+            const b = g.querySelector('.nav-group-body');
+            const others = [...document.querySelectorAll('.nav-group')]
+                .filter(x => x !== g)
+                .map(x => Math.round(x.querySelector('.nav-group-body').getBoundingClientRect().height));
+            return {
+                cls: g.classList.contains('collapsed'),
+                display: getComputedStyle(b).display,
+                h: Math.round(b.getBoundingClientRect().height),
+                others: others,
+                caret: getComputedStyle(g.querySelector('.nav-caret')).transform
+            };
+        `);
+        check(`收起后分组内容真的不占位（display=${collapsedGeo.display}, h=${collapsedGeo.h}）`,
+            collapsedGeo.cls && collapsedGeo.display === 'none' && collapsedGeo.h === 0,
+            JSON.stringify(collapsedGeo));
+        check(`收起一个分组不影响其它分组（其余高度 ${collapsedGeo.others.join(',')}）`,
+            collapsedGeo.others.every(h => h > 0), JSON.stringify(collapsedGeo.others));
+
+        // 收起状态下切进该分组里的视图：必须自动展开
+        await evaluate(cdp, `switchView('databases'); return true;`);
+        await sleep(900);
+        const autoExpand = await evaluate(cdp, `
+            const g = document.querySelector('.nav-group[data-group="ops"]');
+            const act = document.querySelector('.nav-item.active');
+            const r = act.getBoundingClientRect();
+            return {
+                collapsed: g.classList.contains('collapsed'),
+                activeView: act.dataset.view,
+                activeVisible: r.width > 0 && r.height > 0
+            };
+        `);
+        check(`切到收起分组下的视图会自动展开（collapsed=${autoExpand.collapsed}）`,
+            autoExpand.collapsed === false, JSON.stringify(autoExpand));
+        check(`自动展开后高亮项真实可见（${autoExpand.activeView}）`,
+            autoExpand.activeView === 'databases' && autoExpand.activeVisible === true,
+            JSON.stringify(autoExpand));
+
+        /* ---- 9. 新页面：视图互斥 + 图表真实宽度 + 禁用态 ---- */
+        console.log();
+        console.log('── 新增页面：视图互斥与渲染实况 ──');
+        const newViews = ['overview', 'databases', 'dbStats', 'schedules', 'plugins', 'aiConfig'];
+        for (const v of newViews) {
+            await evaluate(cdp, `switchView(${JSON.stringify(v)}); return true;`);
+            await sleep(1100);
+            const st = await evaluate(cdp, `
+                ${VIS_HELPER}
+                const others = ['overview', 'databases', 'dbStats', 'schedules', 'plugins', 'aiConfig',
+                                'inspection', 'baselines', 'rules', 'inspectionRun', 'runs', 'query',
+                                'datasources', 'drivers']
+                    .filter(x => x !== ${JSON.stringify(v)});
+                const leaked = others.filter(x => {
+                    const el = document.getElementById('view-' + x);
+                    return el && getComputedStyle(el).display !== 'none';
+                });
+                return { self: vis('#view-' + ${JSON.stringify(v)}), leaked: leaked,
+                         nav: (document.querySelector('.nav-item.active') || {}).dataset?.view || null };
+            `);
+            check(`切到「${v}」时自身可见、其余 13 个视图全部隐藏（泄漏 ${st.leaked.length} 个）`,
+                st.self === 'visible' && st.leaked.length === 0 && st.nav === v,
+                JSON.stringify(st));
+        }
+
+        // 条形图必须是真像素宽度，不能只有 style 里的百分比
+        await evaluate(cdp, `switchView('dbStats'); return true;`);
+        await sleep(1400);
+        const bars = await evaluate(cdp, `
+            const fills = [...document.querySelectorAll('#view-dbStats .bar-fill')];
+            const widths = fills.map(f => Math.round(f.getBoundingClientRect().width));
+            const tracks = [...document.querySelectorAll('#view-dbStats .bar-track')]
+                .map(t => Math.round(t.getBoundingClientRect().height));
+            return { n: fills.length, maxW: Math.max(0, ...widths), zeroW: widths.filter(w => w === 0).length,
+                     trackH: [...new Set(tracks)] };
+        `);
+        check(`统计页条形图渲染了 ${bars.n} 根条`, bars.n > 0, JSON.stringify(bars));
+        check(`条形有真实像素宽度（最宽 ${bars.maxW}px）`, bars.maxW > 0, JSON.stringify(bars));
+        // 值为 0 的行宽度为 0 是正确表现，这里只要求「不是全部为 0」
+        check(`条形不是全部塌成 0（${bars.zeroW}/${bars.n} 根为 0）`,
+            bars.zeroW < bars.n, JSON.stringify(bars));
+        check(`条形轨道有高度（${bars.trackH.join(',')}px）`,
+            bars.trackH.length === 1 && bars.trackH[0] > 0, JSON.stringify(bars.trackH));
+
+        // 骨架页的禁用按钮必须一眼看出按不了
+        await evaluate(cdp, `switchView('aiConfig'); return true;`);
+        await sleep(600);
+        const dis = await evaluate(cdp, `
+            const of = (id) => {
+                const el = document.getElementById(id);
+                return { disabled: el.disabled, opacity: getComputedStyle(el).opacity,
+                         cursor: getComputedStyle(el).cursor };
+            };
+            return { save: of('btnAiSave'), test: of('btnAiTest'),
+                     sched: of('btnNewSchedule'), plugin: of('btnPluginRefresh') };
+        `);
+        for (const [k, v] of Object.entries(dis)) {
+            check(`#${k} 为禁用态且视觉上不可点（opacity=${v.opacity}, cursor=${v.cursor}）`,
+                v.disabled === true && Number(v.opacity) < 1 && v.cursor === 'not-allowed',
+                JSON.stringify(v));
+        }
 
         /* ---- 截图留证 ---- */
         fs.mkdirSync(SHOT_DIR, { recursive: true });

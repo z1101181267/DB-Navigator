@@ -25,30 +25,84 @@
 
 <div class="layout">
     <nav class="sidebar">
-        <button class="nav-item active" data-view="datasources">
-            <span class="nav-icon">🗄</span><span>数据源纳管</span>
-        </button>
-        <button class="nav-item" data-view="drivers">
-            <span class="nav-icon">🧩</span><span>驱动管理</span>
-        </button>
-        <button class="nav-item" data-view="inspection">
-            <span class="nav-icon">🔍</span><span>巡检配置管理</span>
-        </button>
-        <button class="nav-item" data-view="baselines">
-            <span class="nav-icon">📐</span><span>基线配置管理</span>
-        </button>
-        <button class="nav-item" data-view="rules">
-            <span class="nav-icon">⚙</span><span>规则引擎</span>
-        </button>
-        <button class="nav-item" data-view="inspectionRun">
-            <span class="nav-icon">▶</span><span>巡检执行</span>
-        </button>
-        <button class="nav-item" data-view="runs">
-            <span class="nav-icon">📄</span><span>巡检历史</span>
-        </button>
-        <button class="nav-item" data-view="query">
-            <span class="nav-icon">⌨</span><span>SQL 编辑器</span>
-        </button>
+        <!-- 分组顺序按使用动线排：先看整体（大屏展示），再做日常运维（数据库运维），
+             最后才是改配置（配置与管理）—— 越靠下的越不常动 -->
+        <div class="nav-scroll">
+
+            <div class="nav-group" data-group="screen">
+                <button class="nav-group-head" type="button">
+                    <span class="nav-group-icon">📺</span>
+                    <span class="nav-group-name">大屏展示</span>
+                    <span class="nav-caret">▾</span>
+                </button>
+                <div class="nav-group-body">
+                    <button class="nav-item active" data-view="overview">
+                        <span class="nav-icon">📊</span><span>概览</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="nav-group" data-group="ops">
+                <button class="nav-group-head" type="button">
+                    <span class="nav-group-icon">🛠</span>
+                    <span class="nav-group-name">数据库运维</span>
+                    <span class="nav-caret">▾</span>
+                </button>
+                <div class="nav-group-body">
+                    <button class="nav-item" data-view="databases">
+                        <span class="nav-icon">🗃</span><span>数据库管理</span>
+                    </button>
+                    <button class="nav-item" data-view="dbStats">
+                        <span class="nav-icon">📈</span><span>数据库统计</span>
+                    </button>
+                    <button class="nav-item" data-view="schedules">
+                        <span class="nav-icon">⏱</span><span>定时巡检</span>
+                    </button>
+                    <button class="nav-item" data-view="inspectionRun">
+                        <span class="nav-icon">▶</span><span>巡检执行</span>
+                    </button>
+                    <button class="nav-item" data-view="runs">
+                        <span class="nav-icon">📄</span><span>巡检历史</span>
+                    </button>
+                    <button class="nav-item" data-view="query">
+                        <span class="nav-icon">⌨</span><span>SQL 编辑器</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="nav-group" data-group="config">
+                <button class="nav-group-head" type="button">
+                    <span class="nav-group-icon">🧰</span>
+                    <span class="nav-group-name">配置与管理</span>
+                    <span class="nav-caret">▾</span>
+                </button>
+                <div class="nav-group-body">
+                    <button class="nav-item" data-view="datasources">
+                        <span class="nav-icon">🗄</span><span>数据源纳管</span>
+                    </button>
+                    <button class="nav-item" data-view="drivers">
+                        <span class="nav-icon">🧩</span><span>驱动管理</span>
+                    </button>
+                    <button class="nav-item" data-view="inspection">
+                        <span class="nav-icon">🔍</span><span>巡检配置</span>
+                    </button>
+                    <button class="nav-item" data-view="baselines">
+                        <span class="nav-icon">📐</span><span>基线配置管理</span>
+                    </button>
+                    <button class="nav-item" data-view="rules">
+                        <span class="nav-icon">⚙</span><span>规则引擎</span>
+                    </button>
+                    <button class="nav-item" data-view="plugins">
+                        <span class="nav-icon">🔌</span><span>插件市场</span>
+                    </button>
+                    <button class="nav-item" data-view="aiConfig">
+                        <span class="nav-icon">🤖</span><span>AI配置</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
         <div class="sidebar-foot">
             <div class="foot-title">纳管数据库</div>
             <div class="db-chips" id="dbChips"></div>
@@ -57,8 +111,60 @@
 
     <main class="content">
 
+        <!-- ================= 概览（大屏展示） ================= -->
+        <section class="view active" id="view-overview">
+            <div class="view-head">
+                <div>
+                    <h1>概览</h1>
+                    <p class="sub">平台全貌一屏看完：纳管了多少库、驱动与巡检资产有多少、最近跑得怎么样</p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="btnOvRefresh">刷新</button>
+                </div>
+            </div>
+
+            <div class="stat-strip" id="ovStats"></div>
+
+            <div class="grid-2" style="margin-bottom:16px">
+                <div class="card">
+                    <div class="card-head">
+                        各库类型的巡检资产
+                        <span class="count" id="ovAssetHint"></span>
+                    </div>
+                    <div class="card-body-pad" id="ovAssetChart">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        基线风险分布
+                        <span class="count">按基线规则声明的严重级别</span>
+                    </div>
+                    <div class="card-body-pad" id="ovRiskChart">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-head">
+                        最近巡检执行
+                        <span class="count">最新 5 次</span>
+                    </div>
+                    <div id="ovRuns">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head">常用入口</div>
+                    <div class="card-body-pad" id="ovLinks"></div>
+                </div>
+            </div>
+        </section>
+
         <!-- ================= 数据源纳管 ================= -->
-        <section class="view active" id="view-datasources">
+        <section class="view" id="view-datasources">
             <div class="view-head">
                 <div>
                     <h1>数据源纳管</h1>
@@ -296,6 +402,322 @@
                 </div>
                 <div id="ruleTestWrap">
                     <div class="empty">选择规则与数据源后点击「试跑」</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 数据库管理（数据库运维） ================= -->
+        <section class="view" id="view-databases">
+            <div class="view-head">
+                <div>
+                    <h1>数据库管理</h1>
+                    <p class="sub">
+                        运维视角：选一个已纳管实例，看它的连接信息与实时可达性。
+                        连接参数的登记与修改在「配置与管理 › 数据源纳管」
+                    </p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="btnDbRefresh">刷新</button>
+                </div>
+            </div>
+
+            <div class="split">
+                <div class="card">
+                    <div class="card-head">
+                        已纳管实例
+                        <span class="count" id="dbInstCount"></span>
+                    </div>
+                    <div id="dbInstList">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="card" style="margin-bottom:16px">
+                        <div class="card-head">
+                            实例信息
+                            <span class="count" id="dbInfoHint">未选择</span>
+                        </div>
+                        <div id="dbInfo">
+                            <div class="empty">从左侧选择一个实例</div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-head">
+                            对象浏览
+                            <span class="count">库 / 表 / 字段</span>
+                        </div>
+                        <div class="card-body-pad">
+                            <div class="gap-note">
+                                <span class="gap-icon">!</span>
+                                <div>
+                                    <b>结构浏览接口尚未接入。</b>
+                                    当前后端只提供连接级能力（连接测试、执行 SQL），
+                                    没有「列出库 / 表 / 字段」的元数据接口，因此这里
+                                    不展示对象树 —— 与其画一棵假的树，不如把缺口写清楚。
+                                    <ul>
+                                        <li>待接入：<code>GET /api/datasources/{id}/databases</code> —— 列出实例下的库</li>
+                                        <li>待接入：<code>GET /api/datasources/{id}/tables?schema=</code> —— 列出库下的表与视图</li>
+                                        <li>待接入：<code>GET /api/datasources/{id}/columns?table=</code> —— 列出字段、类型、是否可空</li>
+                                        <li>在接入之前，想查具体对象可以直接用
+                                            <button class="btn-link" data-goto="query">SQL 编辑器</button>
+                                            按元数据表查询</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 数据库统计（数据库运维） ================= -->
+        <section class="view" id="view-dbStats">
+            <div class="view-head">
+                <div>
+                    <h1>数据库统计</h1>
+                    <p class="sub">把平台里已有的配置与执行记录聚合成图：资产分布、规则状态、基线覆盖、执行趋势</p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="btnStatRefresh">刷新</button>
+                </div>
+            </div>
+
+            <div class="stat-strip" id="statStats"></div>
+
+            <div class="grid-2" style="margin-bottom:16px">
+                <div class="card">
+                    <div class="card-head">
+                        规则与章节分布
+                        <span class="count">按库类型</span>
+                    </div>
+                    <div class="card-body-pad" id="statByType">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        基线覆盖
+                        <span class="count">按库类型</span>
+                    </div>
+                    <div class="card-body-pad" id="statBaseline">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2" style="margin-bottom:16px">
+                <div class="card">
+                    <div class="card-head">
+                        规则启用状态
+                        <span class="count" id="statRuleStateHint"></span>
+                    </div>
+                    <div class="card-body-pad" id="statRuleState">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        规则归类 Top 10
+                        <span class="count">按规则条数</span>
+                    </div>
+                    <div class="card-body-pad" id="statCategory">
+                        <div class="empty">加载中…</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    巡检执行趋势
+                    <span class="count" id="statRunHint"></span>
+                </div>
+                <div class="card-body-pad" id="statRuns">
+                    <div class="empty">加载中…</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 定时巡检（数据库运维） ================= -->
+        <section class="view" id="view-schedules">
+            <div class="view-head">
+                <div>
+                    <h1>定时巡检</h1>
+                    <p class="sub">按周期自动发起巡检执行，无需人工点击，产出与手动执行完全一致的报告</p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn btn-primary" id="btnNewSchedule" disabled>+ 新建任务</button>
+                </div>
+            </div>
+
+            <div class="gap-note">
+                <span class="gap-icon">!</span>
+                <div>
+                    <b>调度器尚未接入，本页暂无任务可建。</b>
+                    执行记录表已经预留了 <code>triggerSource</code> 字段用来区分「手动 / 定时」，
+                    但写入定时任务、按周期触发、失败重试这三件事都还没有后端实现。
+                    下面第二张卡用真实执行记录说明这一点 —— 目前全部为手动触发。
+                    <ul>
+                        <li>待接入：定时任务表（任务名 / 目标数据源 / 模板 / 周期表达式 / 启停）</li>
+                        <li>待接入：调度线程与错过补偿（服务重启后不丢任务）</li>
+                        <li>待接入：失败重试与通知（当前执行失败只落库，不外发）</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="stat-strip" id="schedStats"></div>
+
+            <div class="card" style="margin-bottom:16px">
+                <div class="card-head">
+                    定时任务
+                    <span class="count">0 个任务</span>
+                </div>
+                <div id="schedTableWrap"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    执行记录的触发方式
+                    <span class="count" id="schedTriggerHint"></span>
+                </div>
+                <div class="card-body-pad" id="schedTriggerWrap">
+                    <div class="empty">加载中…</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 插件市场（配置与管理） ================= -->
+        <section class="view" id="view-plugins">
+            <div class="view-head">
+                <div>
+                    <h1>插件市场</h1>
+                    <p class="sub">扩展平台能力：巡检规则包、JDBC 驱动包、报告导出模板</p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="btnPluginRefresh" disabled>刷新清单</button>
+                </div>
+            </div>
+
+            <div class="gap-note">
+                <span class="gap-icon">!</span>
+                <div>
+                    <b>插件源尚未接入，暂无插件可安装。</b>
+                    本页的搜索、分类与卡片布局已就位，但没有可枚举的插件源，
+                    所以列表是空的 —— 不预置任何「示例插件」占位，免得被当成真能装。
+                    <ul>
+                        <li>待接入：插件清单源（本地目录扫描 + 远端仓库索引）</li>
+                        <li>待接入：插件签名与完整性校验</li>
+                        <li>待接入：安装 / 升级 / 卸载与依赖检查</li>
+                    </ul>
+                    <p style="margin:8px 0 0">
+                        当前要新增 JDBC 驱动，请走
+                        <button class="btn-link" data-goto="drivers">驱动管理</button>
+                        的「上传驱动 JAR」—— 那条链路是通的。
+                    </p>
+                </div>
+            </div>
+
+            <div class="base-toolbar" style="margin-bottom:14px">
+                <input type="text" class="rule-search" id="pluginKeyword" placeholder="搜索插件名 / 作者" disabled>
+                <select class="select" id="pluginCatSel" disabled>
+                    <option value="">全部分类</option>
+                    <option value="rules">巡检规则包</option>
+                    <option value="driver">驱动包</option>
+                    <option value="report">报告模板</option>
+                </select>
+                <span class="count" id="pluginCount">0 个插件</span>
+            </div>
+
+            <div class="plugin-grid" id="pluginGrid">
+                <div class="empty">插件源未接入，列表为空</div>
+            </div>
+        </section>
+
+        <!-- ================= AI配置（配置与管理） ================= -->
+        <section class="view" id="view-aiConfig">
+            <div class="view-head">
+                <div>
+                    <h1>AI配置</h1>
+                    <p class="sub">把巡检结果交给大模型做归因与处置建议，减少人工翻报告的成本</p>
+                </div>
+            </div>
+
+            <div class="gap-note">
+                <span class="gap-icon">!</span>
+                <div>
+                    <b>模型服务尚未接入，本页的配置不会保存，也不会发出任何请求。</b>
+                    表单按接入后的形态摆好，但「保存」与「测试连接」两个按钮是禁用的：
+                    在真正有持久化与连通性测试之前，让按钮可点、点了提示「成功」，就是在骗人。
+                    另外，本页当前不读写任何凭据 —— 请在接入后再考虑填 API Key。
+                    <ul>
+                        <li>待接入：配置持久化（供应商 / Base URL / 模型名 / 超时）</li>
+                        <li>待接入：API Key 的加密存储与脱敏回显</li>
+                        <li>待接入：连通性测试与用量统计</li>
+                        <li>待接入：巡检报告的一键归因与建议生成</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-head">
+                        模型服务
+                        <span class="count">未配置</span>
+                    </div>
+                    <div class="card-body-pad">
+                        <label class="field">
+                            <span>供应商</span>
+                            <select id="aiProvider">
+                                <option value="openai">OpenAI 兼容接口</option>
+                                <option value="dashscope">通义千问（DashScope）</option>
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="ollama">本地 Ollama</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>Base URL</span>
+                            <input type="text" id="aiBaseUrl" placeholder="https://api.example.com/v1">
+                        </label>
+                        <label class="field">
+                            <span>模型名</span>
+                            <input type="text" id="aiModel" placeholder="例如 qwen-plus">
+                        </label>
+                        <label class="field">
+                            <span>API Key</span>
+                            <input type="password" id="aiApiKey" placeholder="接入后填写，当前不会被保存">
+                        </label>
+                        <div class="modal-foot" style="border:0;padding:8px 0 0">
+                            <div class="spacer"></div>
+                            <button class="btn" id="btnAiTest" disabled>测试连接</button>
+                            <button class="btn btn-primary" id="btnAiSave" disabled>保存</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">接入后的能力边界</div>
+                    <div class="card-body-pad">
+                        <div class="plan-list">
+                            <div class="plan-item">
+                                <strong>归因</strong>
+                                <span>把失败规则、基线超限项连同当时的 SQL 与结果一起交给模型，给出可能原因</span>
+                            </div>
+                            <div class="plan-item">
+                                <strong>建议</strong>
+                                <span>针对超限项给出可执行的处置动作，并标注风险等级</span>
+                            </div>
+                            <div class="plan-item">
+                                <strong>不改判</strong>
+                                <span>模型输出只作为报告的补充章节，不参与合规率计算 ——
+                                    合规率必须由基线算子确定性地算出来</span>
+                            </div>
+                            <div class="plan-item">
+                                <strong>可关闭</strong>
+                                <span>未配置模型服务时，巡检执行与报告导出不受任何影响</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>

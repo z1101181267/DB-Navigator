@@ -1,7 +1,12 @@
 /* ============================================================
    DOM 冒烟测试 —— 在 jsdom 里真实执行前端 app.js
-   校验：boot 流程、视图切换、驱动管理两栏布局、
-        巡检配置管理（页签 / 模板树 / 章节引用规则）、
+   校验：boot 流程、侧栏三分组（大屏展示 / 数据库运维 / 配置与管理）、
+        视图切换、驱动管理两栏布局、
+        概览（KPI / 条形图 / 风险分布 / 最近执行 / 快捷入口）、
+        数据库管理（实例列表 / 信息卡 / 边界标注）、数据库统计（各分布图）、
+        定时巡检（空态 + 触发方式取自真实记录）、
+        插件市场与 AI配置（骨架页的禁用态与边界声明）、
+        巡检配置（页签 / 模板树 / 章节引用规则）、
         基线配置管理（独立菜单）、规则引擎（规则库 / 试跑入口）、
         巡检执行（发起 → 报告渲染）、
         巡检历史（列表 / 筛选 / 在线预览 / 三格式下载入口）
@@ -82,9 +87,57 @@ function tplItemOf(doc, label) {
     check('侧边栏数据库 chips 已渲染', $('dbChips').children.length >= 5, $('dbChips').children.length);
     check('数据源表格已渲染', $('dsTable').querySelector('tbody').innerHTML.length >= 0);
 
-    console.log('\n\u2500\u2500 切换到「巡检配置管理」视图 \u2500\u2500');
+    console.log('\n\u2500\u2500 侧栏三分组 \u2500\u2500');
+    const groups = [...doc.querySelectorAll('.nav-group')];
+    check('侧栏分为 3 个分组', groups.length === 3, groups.length);
+    check('分组名称依次为 大屏展示 / 数据库运维 / 配置与管理',
+        groups.map(g => g.querySelector('.nav-group-name').textContent.trim()).join('|')
+        === '大屏展示|数据库运维|配置与管理',
+        groups.map(g => g.querySelector('.nav-group-name').textContent.trim()).join('|'));
+
+    const groupItems = (name) => {
+        const g = groups.find(x => x.querySelector('.nav-group-name').textContent.trim() === name);
+        return g ? [...g.querySelectorAll('.nav-item')].map(i => i.textContent.trim()) : [];
+    };
+    // textContent 会把图标 span 的字符一起带出来（📊概览），所以用包含判断
+    check('大屏展示下只有「概览」',
+        groupItems('大屏展示').length === 1 && groupItems('大屏展示')[0].includes('概览'),
+        groupItems('大屏展示').join('|'));
+    check('数据库运维下 6 项（含保留的巡检执行与 SQL 编辑器）',
+        groupItems('数据库运维').length === 6, groupItems('数据库运维').join('|'));
+    check('配置与管理下 7 项（含插件市场与 AI配置）',
+        groupItems('配置与管理').length === 7, groupItems('配置与管理').join('|'));
+    check('全站共 14 个导航入口', doc.querySelectorAll('.nav-item').length === 14,
+        doc.querySelectorAll('.nav-item').length);
+    check('每个导航入口都有对应的视图区块',
+        [...doc.querySelectorAll('.nav-item')].every(b => !!$('view-' + b.dataset.view)),
+        [...doc.querySelectorAll('.nav-item')].filter(b => !$('view-' + b.dataset.view))
+            .map(b => b.dataset.view).join(','));
+
+    // 收起 / 展开。这里只断言 class 变化：jsdom 不加载外部 CSS，
+    // 算不出 display，样式层面的验证交给 ui_guard.js（真浏览器）
+    const opsGroup = groups.find(x => x.dataset.group === 'ops');
+    const opsHead = opsGroup.querySelector('.nav-group-head');
+    const clickHead = () => opsHead.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    clickHead();
+    check('点分组标题可收起', opsGroup.classList.contains('collapsed'));
+    clickHead();
+    check('再点一次可展开', !opsGroup.classList.contains('collapsed'));
+
+    // 收起状态下切到该分组里的视图：必须自动展开，
+    // 否则高亮项藏在收起的分组里，点了菜单看起来像没反应
+    clickHead();
+    doc.querySelector('.nav-item[data-view="databases"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    check('切到收起分组下的视图会自动展开', !opsGroup.classList.contains('collapsed'));
+    check('切换后导航高亮唯一且落在目标项上',
+        doc.querySelectorAll('.nav-item.active').length === 1
+        && doc.querySelector('.nav-item.active').dataset.view === 'databases',
+        doc.querySelector('.nav-item.active') && doc.querySelector('.nav-item.active').dataset.view);
+
+    console.log('\n\u2500\u2500 切换到「巡检配置」视图 \u2500\u2500');
     const navInsp = doc.querySelector('.nav-item[data-view="inspection"]');
-    check('导航存在「巡检配置管理」入口', !!navInsp);
+    check('导航存在「巡检配置」入口', !!navInsp);
     navInsp.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
     const statsOk = await until(() => $('inspStats').querySelector('.stat-num'), 'stats');
@@ -149,7 +202,7 @@ function tplItemOf(doc, label) {
     check('基线已从巡检配置页签中移除',
         !doc.querySelector('#view-inspection .tab[data-tab="base"]')
         && !doc.getElementById('pane-base'));
-    check('巡检配置管理只剩两个页签',
+    check('巡检配置页只剩两个页签',
         doc.querySelectorAll('#view-inspection .tab').length === 2,
         doc.querySelectorAll('#view-inspection .tab').length);
 
@@ -171,7 +224,7 @@ function tplItemOf(doc, label) {
         $('ruleTableWrap').querySelectorAll('[data-test-rule]').length);
     check('试跑规则下拉已填充', $('ruleTestSel').options.length > 1, $('ruleTestSel').options.length);
     check('试跑数据源下拉已填充', $('ruleTestDs').options.length > 1, $('ruleTestDs').options.length);
-    check('规则库不占用巡检配置管理的页签', !doc.getElementById('pane-rules'));
+    check('规则库不占用巡检配置的页签', !doc.getElementById('pane-rules'));
 
     console.log('\n\u2500\u2500 填入示例值 → 运行校验 \u2500\u2500');
     $('btnFillDemo').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
@@ -383,6 +436,108 @@ function tplItemOf(doc, label) {
             && $('runsList').querySelectorAll('.run-item').length > 0,
             $('runsCount').textContent.trim());
     }
+
+    console.log('\n\u2500\u2500 概览（大屏展示） \u2500\u2500');
+    doc.querySelector('.nav-item[data-view="overview"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const ovOk = await until(() => $('ovStats').querySelectorAll('.stat-card').length >= 6, 'overview');
+    check('概览 KPI 卡已渲染', ovOk, $('ovStats').querySelectorAll('.stat-card').length);
+    check('概览 KPI 含「规则库」与「基线规则」',
+        $('ovStats').textContent.includes('规则库') && $('ovStats').textContent.includes('基线规则'));
+    check('概览资产条形图已渲染', $('ovAssetChart').querySelectorAll('.bar-row').length > 0,
+        $('ovAssetChart').querySelectorAll('.bar-row').length);
+    check('条形图每行都给了非零宽度（不是空壳）',
+        [...$('ovAssetChart').querySelectorAll('.bar-fill')]
+            .every(el => /width:\s*\d+%/.test(el.getAttribute('style') || '')),
+        $('ovAssetChart').querySelector('.bar-fill').getAttribute('style'));
+    check('概览风险分布 4 个等级齐备', $('ovRiskChart').querySelectorAll('.risk-box').length === 4,
+        $('ovRiskChart').querySelectorAll('.risk-box').length);
+    check('概览最近执行区已渲染（表格或空态）',
+        !!$('ovRuns').querySelector('table.table') || !!$('ovRuns').querySelector('.empty'));
+    check('概览常用入口 6 个', $('ovLinks').querySelectorAll('.quick-link').length === 6,
+        $('ovLinks').querySelectorAll('.quick-link').length);
+
+    // 快捷入口是真能跳的，不是装饰
+    const gotoDs = [...$('ovLinks').querySelectorAll('.quick-link')]
+        .find(b => b.dataset.goto === 'datasources');
+    gotoDs.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(200);
+    check('概览快捷入口能切换视图',
+        doc.querySelector('.nav-item.active').dataset.view === 'datasources'
+        && $('view-datasources').classList.contains('active'),
+        doc.querySelector('.nav-item.active').dataset.view);
+
+    console.log('\n\u2500\u2500 数据库管理（数据库运维） \u2500\u2500');
+    doc.querySelector('.nav-item[data-view="databases"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const dbOk = await until(() => $('dbInstList').querySelectorAll('.pick-item').length > 0, 'dbmgmt');
+    check('实例列表已渲染', dbOk, $('dbInstList').querySelectorAll('.pick-item').length);
+    check('默认选中第一个实例', !!$('dbInstList').querySelector('.pick-item.active'));
+    check('实例信息卡给出库类型与连接状态',
+        $('dbInfo').textContent.includes('库类型') && $('dbInfo').textContent.includes('连接状态'));
+    check('实例信息卡给出地址与库名',
+        $('dbInfo').textContent.includes('地址') && $('dbInfo').textContent.includes('库 / 服务'));
+    check('提供连接测试入口', !!$('btnDbTest'));
+    check('对象浏览如实标注接口尚未接入',
+        $('view-databases').textContent.includes('结构浏览接口尚未接入'));
+    check('没有伪造对象树', !$('view-databases').querySelector('.obj-tree'));
+
+    console.log('\n\u2500\u2500 数据库统计（数据库运维） \u2500\u2500');
+    doc.querySelector('.nav-item[data-view="dbStats"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const stOk = await until(() => $('statByType').querySelectorAll('.bar-row').length > 0, 'dbStats');
+    check('按库类型的规则分布已渲染', stOk, $('statByType').querySelectorAll('.bar-row').length);
+    check('基线覆盖图已渲染', $('statBaseline').querySelectorAll('.bar-row').length > 0,
+        $('statBaseline').querySelectorAll('.bar-row').length);
+    check('规则启用状态三项齐备', $('statRuleState').querySelectorAll('.bar-row').length === 3,
+        $('statRuleState').querySelectorAll('.bar-row').length);
+    check('规则归类 Top 10 不超过 10 行',
+        $('statCategory').querySelectorAll('.bar-row').length <= 10,
+        $('statCategory').querySelectorAll('.bar-row').length);
+    check('统计 KPI 含平均合规率', $('statStats').textContent.includes('平均合规率'));
+
+    console.log('\n\u2500\u2500 定时巡检（数据库运维） \u2500\u2500');
+    doc.querySelector('.nav-item[data-view="schedules"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const schOk = await until(() => $('schedTriggerWrap').querySelectorAll('.bar-row').length > 0, 'schedules');
+    check('触发方式分布已渲染（取自真实执行记录）', schOk,
+        $('schedTriggerWrap').querySelectorAll('.bar-row').length);
+    check('任务表保持空态而非伪造任务',
+        !!$('schedTableWrap').querySelector('.empty')
+        && $('schedTableWrap').querySelectorAll('tbody tr').length === 1,
+        $('schedTableWrap').querySelectorAll('tbody tr').length);
+    check('任务表列出了接入后要用的列',
+        ['任务名', '目标数据源', '巡检模板', '周期', '上次执行', '状态']
+            .every(h => $('schedTableWrap').textContent.includes(h)));
+    check('新建任务按钮为禁用态', $('btnNewSchedule').disabled === true);
+    check('页面明确说明调度器尚未接入',
+        $('view-schedules').textContent.includes('调度器尚未接入'));
+
+    console.log('\n\u2500\u2500 插件市场（配置与管理） \u2500\u2500');
+    doc.querySelector('.nav-item[data-view="plugins"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(150);
+    check('插件列表为空态且未伪造插件',
+        !!$('pluginGrid').querySelector('.empty')
+        && $('pluginGrid').querySelectorAll('.plugin-card').length === 0,
+        $('pluginGrid').querySelectorAll('.plugin-card').length);
+    check('搜索与分类控件已就位但禁用',
+        $('pluginKeyword').disabled === true && $('pluginCatSel').disabled === true);
+    check('插件计数显示 0 个插件', $('pluginCount').textContent.trim() === '0 个插件',
+        $('pluginCount').textContent.trim());
+    check('页面说明插件源尚未接入', $('view-plugins').textContent.includes('插件源尚未接入'));
+
+    console.log('\n\u2500\u2500 AI配置（配置与管理） \u2500\u2500');
+    doc.querySelector('.nav-item[data-view="aiConfig"]')
+        .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(150);
+    check('保存与测试连接按钮均为禁用态',
+        $('btnAiSave').disabled === true && $('btnAiTest').disabled === true);
+    check('表单字段齐备（供应商 / Base URL / 模型名 / API Key）',
+        !!$('aiProvider') && !!$('aiBaseUrl') && !!$('aiModel') && !!$('aiApiKey'));
+    check('页面声明配置不会被保存', $('view-aiConfig').textContent.includes('不会保存'));
+    check('页面声明模型不改判合规率',
+        $('view-aiConfig').textContent.includes('不参与合规率计算'));
 
     console.log('\n\u2500\u2500 运行时错误 \u2500\u2500');
     const realErrors = consoleErrors.filter(e => !/Not implemented|Could not parse CSS/.test(e));
