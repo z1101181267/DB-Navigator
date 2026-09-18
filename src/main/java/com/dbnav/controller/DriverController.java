@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * REST API for JDBC driver management.
  *
- * Endpoints aligned with RaccoonX's driver management UI/API:
+ * Endpoints:
  *   GET    /api/drivers/types              — list all supported db types
  *   GET    /api/drivers                    — list all registered drivers
  *   GET    /api/drivers/{dbType}           — list drivers for a specific db_type

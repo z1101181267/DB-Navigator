@@ -12,7 +12,6 @@ import java.util.Optional;
 /**
  * Builds JDBC connection URLs from database type templates.
  *
- * Aligned with RaccoonX's connection URL construction logic.
  * Each db_type has a URL template defined in db-types.json:
  *   - Oracle:  jdbc:oracle:thin:@//{host}:{port}/{service_name}
  *              jdbc:oracle:thin:@{host}:{port}:{sid}  (SID mode)
@@ -76,7 +75,7 @@ public class ConnectionUrlBuilder {
     /**
      * Build Oracle JDBC URL — supports both SID and service_name modes.
      *
-     * RaccoonX uses service_name by default. SID mode is an alternative.
+     * service_name mode is the default; SID mode is an alternative.
      */
     private String buildOracleUrl(DbTypeMeta meta, DataSourceInfo ds) {
         String host = ds.getHost();

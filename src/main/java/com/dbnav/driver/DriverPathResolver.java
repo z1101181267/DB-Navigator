@@ -11,8 +11,8 @@ import java.nio.file.Paths;
 /**
  * Resolves and relocates JDBC driver JAR paths.
  *
- * Aligned with RaccoonX's _relocate_jar_path() — solves the problem where
- * absolute jar_path stored in the registry becomes invalid after packaging
+ * Solves the problem where an absolute jar_path stored in the registry becomes
+ * invalid after packaging
  * or moving the application. Uses three-layer fallback scan:
  *
  *   1) drivers/<db_type>/<version>/<jar_filename>   — standard layout

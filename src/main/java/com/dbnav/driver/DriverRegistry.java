@@ -15,15 +15,15 @@ import java.util.Optional;
 /**
  * JDBC Driver Registry — core CRUD + activation logic.
  *
- * Aligned with RaccoonX's driver_registry.py:
+ * Operations:
  *   - add_driver:           validates + moves JAR + INSERT + auto-activate
  *   - delete_driver:        DELETE + auto-activate next driver
  *   - activate_driver:      set is_active=0 for same db_type, then =1 for target
  *   - get_active_driver:    SELECT WHERE db_type=? AND is_active=1
  *   - get_driver:           SELECT WHERE db_type=? [AND version=?]
  *   - list_drivers:         SELECT all (optionally filtered by db_type)
- *   - scan_driver_dirs:     scan disk and auto-register (delegated to DriverDirectoryScanner)
- *   - seed_driver_registry: import from JSON if table is empty (delegated to DriverSeedLoader)
+ *   - scanDisk:             scan disk and auto-register (delegated to DriverDirectoryScanner)
+ *   - seedIfEmpty:          import from JSON if table is empty (delegated to DriverSeedLoader)
  *
  * UNIQUE constraint: (db_type, version, jar_filename)
  * Activation rule: only one driver per db_type can be is_active=1.
@@ -55,7 +55,7 @@ public class DriverRegistry {
     }
 
     /**
-     * Register a new driver. Aligned with RaccoonX's add_driver().
+     * Register a new driver.
      *
      * Steps:
      *   1. Validate db_type and version (regex)
@@ -79,7 +79,7 @@ public class DriverRegistry {
         }
 
         // 3. Validate filename (defense against path traversal)
-        // Aligned with RaccoonX: check BEFORE basename to prevent traversal
+        // Check BEFORE basename to prevent traversal
         if (originalFilename == null
                 || originalFilename.contains("/")
                 || originalFilename.contains("\\")
@@ -139,7 +139,7 @@ public class DriverRegistry {
     }
 
     /**
-     * Delete a driver. Aligned with RaccoonX's delete_driver():
+     * Delete a driver:
      *   - DELETE from registry
      *   - If deleted driver was active, auto-activate next (uploaded_at DESC)
      *   - Delete JAR file from disk
@@ -185,7 +185,6 @@ public class DriverRegistry {
 
     /**
      * Activate a specific driver version for a db_type.
-     * Aligned with RaccoonX's activate_driver():
      *   1. Set is_active=0 for ALL drivers of this db_type
      *   2. Set is_active=1 for the target driver
      */
@@ -201,7 +200,6 @@ public class DriverRegistry {
 
     /**
      * Get the active driver for a db_type.
-     * Aligned with RaccoonX's get_active_driver().
      */
     public Optional<DriverInfo> getActiveDriver(String dbType) {
         List<DriverInfo> results = jdbc.query(
@@ -212,7 +210,6 @@ public class DriverRegistry {
 
     /**
      * Get a specific driver by db_type and optional version.
-     * Aligned with RaccoonX's get_driver().
      */
     public Optional<DriverInfo> getDriver(String dbType, String version) {
         String sql;
@@ -310,7 +307,7 @@ public class DriverRegistry {
                     """, dbType, version, driverClass, jarFilename, jarPath, fileSize,
                     isActive ? 1 : 0, note != null ? note : "");
         } catch (org.springframework.dao.DuplicateKeyException e) {
-            // Idempotent: skip if already registered (aligned with RaccoonX's INSERT OR IGNORE)
+            // Idempotent: skip if already registered
             log.debug("Driver already registered (skipped): {} v{} {}", dbType, version, jarFilename);
         }
     }

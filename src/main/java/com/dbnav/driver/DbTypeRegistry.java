@@ -18,11 +18,11 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Database type metadata registry.
  *
- * Aligned with RaccoonX's dbtype_registry.py:
- *   - Loads builtin types from JSON (db-types.json, equivalent of builtin_types.json)
+ * Responsibilities:
+ *   - Loads built-in types from JSON (db-types.json)
  *   - Provides getDbMeta(db_type) lookup
  *   - Provides getDriverClassHint(db_type) for scan/seed operations
- *   - In-memory cache (like RaccoonX's _ALL_CACHE)
+ *   - In-memory cache for repeated lookups
  *
  * Supported types: oracle, mysql, postgresql, sqlserver, kingbase
  */
@@ -47,7 +47,6 @@ public class DbTypeRegistry {
 
     /**
      * Load built-in database types from JSON resource.
-     * Aligned with RaccoonX's load_builtin_types().
      */
     public void loadBuiltinTypes() {
         try {
@@ -78,7 +77,6 @@ public class DbTypeRegistry {
 
     /**
      * Get metadata for a specific db_type.
-     * Aligned with RaccoonX's get_db_meta().
      */
     public Optional<DbTypeMeta> getDbMeta(String dbType) {
         return Optional.ofNullable(typeMap.get(dbType));
@@ -86,7 +84,6 @@ public class DbTypeRegistry {
 
     /**
      * Get all registered database types.
-     * Aligned with RaccoonX's load_all_db_types().
      */
     public List<DbTypeMeta> getAllTypes() {
         return Collections.unmodifiableList(allTypes);

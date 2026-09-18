@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Manages database connection pools and CRUD for data source configurations.
  *
- * Combines RaccoonX's instance_manager.py + connection management:
+ * Responsibilities:
  *   - Stores data source configs in data_source table (passwords encrypted)
  *   - Creates HikariCP connection pools on demand
  *   - Uses DynamicDriverLoader to load JDBC drivers at runtime
@@ -220,7 +220,7 @@ public class DataSourceManager {
 
     /**
      * Test a database connection without creating a pool.
-     * Aligned with RaccoonX's connection test API (/api/test_db).
+     * Backs the /api/test_db endpoint.
      */
     public Map<String, Object> testConnection(DataSourceInfo ds) {
         Map<String, Object> result = new LinkedHashMap<>();

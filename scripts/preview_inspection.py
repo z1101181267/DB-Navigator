@@ -3,7 +3,7 @@
 """
 巡检配置与执行预览实现（对齐 Java 侧 InspectionConfigService / BaselineChecker / InspectionRunner）。
 
-本模块被 devserver.py 调用，用 SQLite 复刻 RaccoonX 的巡检模型：
+本模块被 devserver.py 调用，用 SQLite 复刻巡检模型：
     模板 → 章节 → 规则（两级 ON DELETE CASCADE）
     配置基线（独立表）
     修改留痕（独立表）

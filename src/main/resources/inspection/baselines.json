@@ -1,5 +1,5 @@
 {
-  "_comment": "配置基线默认值。数值与 operator / risk_level 对齐 RaccoonX modules/inspection/dal.py 的 _builtin_default_baselines()。operator 取值：= > < >= <= != BETWEEN LIKE。BETWEEN 时用 expected_value_min / expected_value_max。h2 一组是平台自检基线（校验的是内置 H2 自检库自身，而非生产库），刻意包含会「不合规」与「未采集」的条目，用来覆盖三种判定结果。",
+  "_comment": "配置基线默认值。数值与 operator / risk_level 为内置默认阈值。operator 取值：= > < >= <= != BETWEEN LIKE。BETWEEN 时用 expected_value_min / expected_value_max。h2 一组是平台自检基线（校验的是内置 H2 自检库自身，而非生产库），刻意包含会「不合规」与「未采集」的条目，用来覆盖三种判定结果。",
   "baselines": {
 
     "oracle": [

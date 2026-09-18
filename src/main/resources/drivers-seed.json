@@ -1,5 +1,5 @@
 {
-  "_comment": "DB Navigator driver seed metadata (aligned with RaccoonX drivers_seed.json). No jar_path - resolved at import time by filename. Place JARs under drivers/<db_type>/<version>/. NOTE: the seed is imported ONLY when the registry table is empty. Declarative fields (note, driver_class) therefore only take effect on a fresh database - editing them here will not update an existing install. Observed fields (jar_path, file_size) ARE reconciled on every startup scan. To refresh declarative metadata, drop the jdbc_driver_registry table and restart.",
+  "_comment": "DB Navigator driver seed metadata. No jar_path - resolved at import time by filename. Place JARs under drivers/<db_type>/<version>/. NOTE: the seed is imported ONLY when the registry table is empty. Declarative fields (note, driver_class) therefore only take effect on a fresh database - editing them here will not update an existing install. Observed fields (jar_path, file_size) ARE reconciled on every startup scan. To refresh declarative metadata, drop the jdbc_driver_registry table and restart.",
   "exported_at": "2026-09-17T19:00:00",
   "drivers": [
     {

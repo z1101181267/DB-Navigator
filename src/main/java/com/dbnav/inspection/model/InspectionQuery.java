@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 /**
  * 巡检 SQL 规则。
  *
- * 对齐 RaccoonX 的 inspection_query 表：
+ * 字段：
  *   chapter_id / query_key / query_sql / query_description_zh / query_description_en
  *   enabled / sort_order
  *

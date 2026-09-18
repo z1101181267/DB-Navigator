@@ -16,11 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Dynamically loads JDBC drivers from JAR files using URLClassLoader.
  *
- * Aligned with RaccoonX's JPype-based approach (which uses JVM classpath
- * to load JDBC drivers). In pure Java, we use URLClassLoader to achieve
- * the same result: load any JAR at runtime without pre-configuring classpath.
+ * Loads any JAR at runtime without pre-configuring the classpath, using a
+ * URLClassLoader built per driver version.
  *
- * Key design decisions (matching RaccoonX patterns):
+ * Key design decisions:
  *   - One URLClassLoader per (dbType + version) combination
  *   - ClassLoaders are cached in a ConcurrentHashMap for reuse
  *   - Driver instances are also cached to avoid repeated Class.forName()

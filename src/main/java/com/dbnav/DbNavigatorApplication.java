@@ -7,9 +7,9 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 /**
  * DB Navigator - Multi-database management platform.
  *
- * JDBC driver management aligned with RaccoonX (DBCheck) open-source project:
+ * JDBC driver management:
  *   - drivers/<db_type>/<version>/<jar> directory structure
- *   - Driver metadata registry in embedded DB (H2, equivalent of RaccoonX SQLite)
+ *   - Driver metadata registry in the embedded H2 database
  *   - Seed configuration for out-of-box driver registration
  *   - Directory scanning with auto-registration
  *   - Path relocation for packaged deployment

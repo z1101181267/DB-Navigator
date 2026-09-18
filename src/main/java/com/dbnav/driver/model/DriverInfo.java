@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 /**
  * JDBC driver metadata entity.
  *
- * Mirrors RaccoonX's jdbc_driver_registry table:
+ * Maps to the jdbc_driver_registry table:
  *   id, db_type, version, driver_class, jar_filename, jar_path,
  *   file_size, is_active, uploaded_at, note
  *

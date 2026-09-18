@@ -10,8 +10,9 @@ import java.util.Base64;
 /**
  * Password encryption utility (AES-256-GCM).
  *
- * Aligned with RaccoonX's approach of encrypting database passwords at rest
- * (RaccoonX uses Python Fernet; we use AES-GCM for the Java equivalent).
+ * Database passwords are encrypted at rest, so a leaked database file does not
+ * directly expose credentials. AES-GCM with a fresh random IV per record — the
+ * same plaintext therefore produces different ciphertext every time.
  */
 public class PasswordEncryptor {
 

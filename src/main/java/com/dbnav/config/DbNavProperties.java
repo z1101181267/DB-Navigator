@@ -26,10 +26,10 @@ public class DbNavProperties {
     /** Database types JSON resource path */
     private String dbTypesConfig = "classpath:db-types.json";
 
-    /** 巡检模板种子（对齐 RaccoonX init_db 的默认章节与查询） */
+    /** 巡检模板种子（默认章节与查询） */
     private String inspectionTemplates = "classpath:inspection/templates.json";
 
-    /** 配置基线种子（对齐 RaccoonX _builtin_default_baselines） */
+    /** 配置基线种子（内置默认阈值） */
     private String inspectionBaselines = "classpath:inspection/baselines.json";
 
     @Data

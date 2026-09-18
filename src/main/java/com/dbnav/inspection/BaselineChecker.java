@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
 /**
  * 配置基线判定器。
  *
- * 对齐 RaccoonX 的 operator 语义，把「采集到的实际值」与「期望值」比对：
+ * 把「采集到的实际值」与「期望值」按 operator 比对：
  *
  *   =        实际 == 期望                      → 合规
  *   !=       实际 != 期望                      → 合规

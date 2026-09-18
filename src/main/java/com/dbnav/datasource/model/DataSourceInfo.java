@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  * Managed data source entity — represents a configured database connection.
  *
  * Stored in the data_source table. Passwords are AES-encrypted at rest
- * (aligned with RaccoonX's Fernet-based password encryption).
+ * (AES-GCM with a fresh random IV per record).
  */
 @Data
 @Builder

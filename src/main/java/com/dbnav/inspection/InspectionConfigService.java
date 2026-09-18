@@ -19,7 +19,7 @@ import java.util.*;
 /**
  * 巡检配置服务：模板 / 章节 / 规则 / 基线的增删改查 + 种子导入 + 修改留痕。
  *
- * 对齐 RaccoonX 的 inspection dal + init_db：
+ * 结构：
  *   - 三层结构：模板 → 章节 → 规则，两级 ON DELETE CASCADE
  *   - 种子导入：表为空时从 templates.json / baselines.json 装载默认配置
  *   - 默认模板互斥：同 db_type 内至多一个 is_default=1
@@ -575,7 +575,6 @@ public class InspectionConfigService {
 
     /**
      * 表为空时导入默认巡检配置。
-     * 对齐 RaccoonX 的 init_default_baselines + init_db 默认模板。
      */
     @Transactional
     public Map<String, Object> seedIfEmpty() {

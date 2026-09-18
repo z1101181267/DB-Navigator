@@ -9,9 +9,8 @@ import lombok.NoArgsConstructor;
 /**
  * Database type metadata, loaded from db-types.json.
  *
- * Aligned with RaccoonX's DBTypeMeta dataclass and builtin_types.json.
- * Each managed database type has connection defaults, JDBC URL template,
- * and driver class hint.
+ * Each managed database type has connection defaults, a JDBC URL template,
+ * and a driver class hint.
  */
 @Data
 @Builder

@@ -1,9 +1,9 @@
 -- ================================================================
 -- DB Navigator - JDBC Driver Registry Schema
--- Aligned with RaccoonX's driver_registry.py init_db()
+-- Created on startup; the surrounding orchestration lives in the Java initializers
 -- ================================================================
 
--- Driver metadata registry (mirrors RaccoonX jdbc_driver_registry table)
+-- Driver metadata registry
 CREATE TABLE IF NOT EXISTS jdbc_driver_registry (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
     db_type         VARCHAR(64)  NOT NULL,
@@ -21,14 +21,14 @@ CREATE TABLE IF NOT EXISTS jdbc_driver_registry (
 CREATE INDEX IF NOT EXISTS idx_dr_dbtype ON jdbc_driver_registry(db_type);
 CREATE INDEX IF NOT EXISTS idx_dr_active ON jdbc_driver_registry(db_type, is_active);
 
--- User-hidden built-in database types (mirrors RaccoonX driver_type_hidden)
+-- User-hidden built-in database types
 CREATE TABLE IF NOT EXISTS driver_type_hidden (
     id      BIGINT AUTO_INCREMENT PRIMARY KEY,
     db_type VARCHAR(64) NOT NULL UNIQUE,
     hidden_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- User-custom database types (mirrors RaccoonX driver_type_custom)
+-- User-custom database types
 CREATE TABLE IF NOT EXISTS driver_type_custom (
     id            BIGINT AUTO_INCREMENT PRIMARY KEY,
     db_type       VARCHAR(64) NOT NULL UNIQUE,
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_qh_time ON query_history(executed_at);
 
 
 -- ================================================================
--- 巡检配置（对齐 RaccoonX modules/inspection/dal.py）
+-- 巡检配置
 --
 -- 模型为三层：模板 → 章节 → SQL 规则，两级 ON DELETE CASCADE。
 -- 另有配置基线与修改留痕两张独立表。

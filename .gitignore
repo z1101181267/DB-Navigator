@@ -46,8 +46,3 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# ---------- 第三方源码快照 ----------
-# .reference/ 存 RaccoonX 的 index.html（约 1.4MB），仅用于对照布局，不参与构建。
-# 不入库：它是别人的产物，且体积大；需要时按 README 里的地址重新抓取即可。
-.reference/

@@ -5,9 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 
 /**
- * Shared ObjectMapper for parsing snake_case configuration files
- * (drivers-seed.json, db-types.json) which stay aligned with RaccoonX's
- * file formats.
+ * Shared ObjectMapper for parsing the snake_case configuration files
+ * (drivers-seed.json, db-types.json).
  *
  * Deliberately NOT a Spring bean: declaring an ObjectMapper bean would
  * disable Spring Boot's Jackson auto-configuration (it is

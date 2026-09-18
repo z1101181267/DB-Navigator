@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 /**
  * 配置基线。
  *
- * 对齐 RaccoonX 的 inspection_baseline 表：
+ * 字段：
  *   db_type / param_name / query_sql / operator / expected_value
  *   expected_value_min / expected_value_max / risk_level
  *   description_zh / description_en / enabled

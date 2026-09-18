@@ -261,7 +261,7 @@ code, pre, textarea {
 .badge-bad { background: var(--danger-soft); color: var(--danger); }
 .badge-active { background: var(--primary-soft); color: var(--primary-dark); }
 
-/* ---------------- Driver management (two-pane, RaccoonX layout) ----------------
+/* ---------------- Driver management (two-pane layout) ----------------
    左 280px = 数据库/产品类型列表，右 = 当前类型的驱动版本表。
    两个 pane 各自独立滚动，整页不滚——驱动多的时候这一点很重要。 */
 .drivers-split {
@@ -508,7 +508,7 @@ table.grid tbody tr:hover { background: #fbfcfe; }
 .loading-row td { text-align: center; color: var(--text-muted); padding: 28px; }
 
 /* ============================================================
-   巡检配置（对齐 RaccoonX：模板 → 章节 → 规则 + 基线校验）
+   巡检配置（模板 → 章节 → 规则 + 基线校验）
    ============================================================ */
 
 /* ---------- 统计条 ---------- */
@@ -782,7 +782,7 @@ table.grid tbody tr:hover { background: #fbfcfe; }
 .link:hover { text-decoration: underline; }
 
 /* ---------- 报告下载按钮 ----------
-   三色对齐 RaccoonX 的 .report-dl-btn：Word 深蓝 / PDF 红 / HTML 青绿。 */
+   三色：Word 深蓝 / PDF 红 / HTML 青绿。 */
 .report-dl-btn {
     border: 0; border-radius: 7px; cursor: pointer;
     font: inherit; font-size: 12.5px; font-weight: 600;

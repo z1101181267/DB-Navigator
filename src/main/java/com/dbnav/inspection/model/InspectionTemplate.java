@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * 巡检模板。
  *
- * 对齐 RaccoonX 的 inspection_template 表：
+ * 字段：
  *   db_type / template_name_zh / template_name_en / version
  *   description / is_default / is_preset
  *

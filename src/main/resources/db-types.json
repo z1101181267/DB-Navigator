@@ -1,5 +1,5 @@
 {
-  "_comment": "DB Navigator built-in database type metadata (aligned with RaccoonX builtin_types.json). Defines connection parameters, JDBC URL templates, and driver class hints for managed databases.",
+  "_comment": "DB Navigator built-in database type metadata. Defines connection parameters, JDBC URL templates, and driver class hints for managed databases.",
   "types": [
     {
       "db_type": "oracle",

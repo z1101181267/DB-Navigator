@@ -12,8 +12,7 @@ import java.util.stream.Collectors;
 /**
  * Scans the drivers/ directory and auto-registers found JARs.
  *
- * Aligned with RaccoonX's scan_driver_dirs():
- *   Handles three layout patterns:
+ * Handles three layout patterns:
  *     1. drivers/<db_type>/<version>/<jar>  — standard (preferred)
  *     2. drivers/<db_type>/<jar>            — legacy flat
  *     3. drivers/<jar>                      — scattered root (skipped, can't classify)

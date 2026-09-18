@@ -1,7 +1,9 @@
 # DB Navigator
 
-多数据库纳管平台，**JDBC 驱动管理体系、巡检配置体系与导航结构对齐开源工具 [RaccoonX（原名 DBCheck）](https://github.com/fiyo/DBCheck)**，
-并在其基础上补齐**巡检执行、报告留痕与多格式导出**能力。
+多数据库纳管平台：**JDBC 驱动管理 · 巡检配置与执行 · 报告留痕与多格式导出**。
+
+面向**异构数据库 + 国产库混布**场景——同一套控制台里纳管 Oracle、MySQL、PostgreSQL、
+SQL Server、KingbaseES，驱动可多版本共存、按需切换，巡检规则与阈值全部配置化落库。
 
 纳管数据库：**Oracle · MySQL · PostgreSQL · SQL Server · KingbaseES（人大金仓）**
 自检数据库：**H2（内置驱动，无需外部实例，用于端到端验证巡检链路）**
@@ -11,32 +13,33 @@ Web 控制台七个顶级菜单：数据源纳管 · 驱动管理 · 巡检配�
 
 ---
 
-## 一、为什么对照 RaccoonX
+## 一、设计出发点
 
-RaccoonX 是目前国产化场景下做得比较扎实的开源数据库巡检/纳管平台（Apache 2.0，支持 21 种数据库、344+ 巡检规则）。
-它最值得借鉴的不是巡检规则本身，而是**异构数据库 + 国产库混布**下的**驱动管理设计**与**巡检配置模型**——这正是多库纳管最容易踩坑的地方：
+多库纳管最容易踩坑的不是 SQL，而是**驱动**与**配置**这两件事：驱动 JAR 版本冲突、
+换机后绝对路径失效、升级驱动怕影响存量连接、库类型定义散落在 `if-else` 链里、
+巡检规则写死在代码里……本项目把这些问题逐条拆开，用「元数据外置 + 表驱动」的方式解决：
 
-| 真实痛点 | RaccoonX 的做法 | 本项目的对齐实现 |
+| 真实痛点 | 设计应对 | 实现落点 |
 |---|---|---|
 | 不同库驱动 JAR 版本冲突、无法共存 | `drivers/<db_type>/<version>/<jar>` 目录分层 | `DriverPathResolver` 三层路径解析 |
-| 打包/换机后绝对路径失效 | `_relocate_jar_path()` 按文件名重定位 | `resolveJarPath()` 三级回退扫描 |
+| 打包/换机后绝对路径失效 | 按文件名重定位 | `resolveJarPath()` 三级回退扫描 |
 | 新增库要改代码 | 驱动元数据存表 + 目录扫描自动登记 | `DriverRegistry` + `DriverDirectoryScanner` |
 | 升级驱动不敢动，怕影响存量连接 | `is_active` 激活位，同类型仅一个生效 | `activateDriver()` 先清后置 |
 | 驱动下载源不可控（信创内网） | 驱动随包分发 + 手工上传 | 上传接口 + 种子导入 |
-| 库类型定义散落在 `elif` 链里 | `builtin_types.json` 外置元数据 | `db-types.json` + `DbTypeMeta` |
+| 库类型定义散落在 `elif` 链里 | 外置 JSON 元数据 | `db-types.json` + `DbTypeMeta` |
 | 巡检规则散落在各库分支代码里 | 模板 → 章节 → 规则 三级配置化落库 | `inspection_*` 五表 + 两级级联 |
 | 阈值判定逻辑按库各写一遍 | 统一算子语义 + 语义枚举序 | `BaselineChecker` 单点实现 |
-| 巡检跑完只出一份 HTML，过后查不到 | 结果拼 HTML 直接返回 | `inspection_run` + 两张明细表持久化，`/runs/latest` 支持趋势对比 |
-| 报告只有 Word/PDF，格式固定 | 每库一份 Word 模板 + 按需转 PDF | 同一份 HTML 渲染出 HTML/PDF，另用 POI 生成可编辑 .docx |
-| 巡检链路无法在无库环境验证 | —（无对应物） | 内置 `h2` 自检类型，`driver_bundled` 免 JAR |
+| 巡检跑完只出一份 HTML，过后查不到 | 执行记录 + 明细表持久化 | `inspection_run` + 两张明细表，`/runs/latest` 支持趋势对比 |
+| 报告格式固定、不可二次加工 | 同一份数据渲染多格式 | 同一份 HTML 渲染出 HTML/PDF，另用 POI 生成可编辑 .docx |
+| 巡检链路无法在无库环境验证 | 内置自检库类型，免外部依赖 | 内置 `h2` 自检类型，`driver_bundled` 免 JAR |
 
 ---
 
-## 二、驱动管理体系（核心对齐点）
+## 二、驱动管理体系
 
 ### 2.1 目录布局
 
-与 RaccoonX 完全一致的 `drivers/<db_type>/<version>/<jar>` 约定：
+`drivers/<db_type>/<version>/<jar>` 目录约定：
 
 ```
 drivers/
@@ -58,7 +61,7 @@ drivers/
 
 ### 2.2 驱动注册表
 
-元数据存于内嵌 H2（对应 RaccoonX 的 `data/drivers.db`，SQLite），表结构一一对应：
+元数据存于内嵌 H2，字段如下：
 
 | 字段 | 说明 |
 |---|---|
@@ -70,9 +73,9 @@ drivers/
 
 ### 2.3 三条自愈链路
 
-1. **种子导入** `DriverSeedLoader` — 首次启动且表为空时，从 `drivers-seed.json` 导入元数据（不含 `jar_path`，按文件名解析），等价于 RaccoonX 的 `seed_driver_registry()`。
-2. **目录扫描** `DriverDirectoryScanner` — 扫描 `drivers/` 实况，自动登记未入库的 JAR（幂等，靠唯一键冲突跳过），等价于 `scan_driver_dirs()`。
-3. **路径重定位** `DriverPathResolver` — 存储路径失效时，按 `类型/版本/文件名` → `类型/文件名` → `根/文件名` 三级回退查找，等价于 `_relocate_jar_path()`。
+1. **种子导入** `DriverSeedLoader` — 首次启动且表为空时，从 `drivers-seed.json` 导入元数据（不含 `jar_path`，按文件名解析）。
+2. **目录扫描** `DriverDirectoryScanner` — 扫描 `drivers/` 实况，自动登记未入库的 JAR（幂等，靠唯一键冲突跳过）。
+3. **路径重定位** `DriverPathResolver` — 存储路径失效时，按 `类型/版本/文件名` → `类型/文件名` → `根/文件名` 三级回退查找。
 
 ### 2.4 版本共存与激活
 
@@ -132,7 +135,7 @@ H2（自检）  jdbc:h2:mem:dbnav_selfcheck;DB_CLOSE_DELAY=-1          # 库名�
 
 ## 四、驱动加载机制
 
-RaccoonX 用 Python `JPype + jaydebeapi` 桥接 JVM 加载 JDBC；本项目是纯 Java，用 **`URLClassLoader` 运行时加载**，效果等价：
+用 **`URLClassLoader` 在运行时加载 JDBC 驱动**，无需预先配置 classpath，也无需重启进程：
 
 ```java
 // DynamicDriverLoader
@@ -242,7 +245,7 @@ new URLClassLoader(new URL[]{jarUrl}, ClassLoader.getPlatformClassLoader());
 
 ## 六、巡检配置体系
 
-巡检配置的数据模型、基线算子语义与预置内容**逐项对齐 RaccoonX**，但落库为 H2 关系表（RaccoonX 为 SQLite）。
+巡检配置落库为 H2 关系表：模板 → 章节 → 规则三级配置化，阈值判定收敛到单点实现。
 
 ### 6.1 八张表
 
@@ -277,7 +280,7 @@ inspection_run ──┬── inspection_run_query     (逐条规则结果)
 
 支持 `= > < >= <= != BETWEEN LIKE` 七种算子，风险等级 `LOW / MEDIUM / HIGH / CRITICAL`。
 
-判定顺序（`BaselineChecker`，与 RaccoonX `check_baseline` 一致）：
+判定顺序（`BaselineChecker`）：
 
 1. **`LIKE`** → 期望值作为子串匹配（大小写不敏感）
 2. **`BETWEEN`** → 实测值需落在 `[min, max]` 闭区间内
@@ -301,9 +304,9 @@ inspection_run ──┬── inspection_run_query     (逐条规则结果)
 | **合计** | **113** | **160** | **88** |
 
 - 五个外部库类型的章节覆盖 21 个巡检维度（连接、配置、存储、复制、锁、慢查询、安全、备份等）
-- 基线阈值取自 RaccoonX `_builtin_default_baselines()`，风险分布：`CRITICAL 1 / HIGH 17 / MEDIUM 26 / LOW 19`
+- 基线阈值为内置默认值，风险分布：`CRITICAL 1 / HIGH 17 / MEDIUM 26 / LOW 19`
   （唯一的 `CRITICAL` 是 SQL Server 的 `HAS_DBACCESS`）
-- **H2 一组是本项目新增**，不属于 RaccoonX：它让「驱动加载 → 规则执行 → 结果集预览 → 基线采集判定 → 落库与报告」
+- **H2 一组是内置自检数据**：它让「驱动加载 → 规则执行 → 结果集预览 → 基线采集判定 → 落库与报告」
   整条链路在没有外部数据库的机器上也能**真实跑通**，而不是靠 mock。详见 §7.4。
 
 种子文件位于 `src/main/resources/inspection/`：
@@ -313,22 +316,22 @@ inspection_run ──┬── inspection_run_query     (逐条规则结果)
 
 导入策略与驱动一致：**表为空时才导入**，幂等，不覆盖用户改动。预置模板 `is_preset=1`，默认拒绝删除，名称与版本受保护。
 
-### 6.4 与 RaccoonX 的对应关系
+### 6.4 关键实现落点
 
-| RaccoonX（Python） | 本项目（Java） |
+| 环节 | 落点 |
 |---|---|
-| `inspection_templates.json` 种子 | `inspection/templates.json` + `InspectionConfigService.loadTemplateSeed()` |
-| `_builtin_default_baselines()` | `inspection/baselines.json` + `loadBaselineSeed()` |
-| `check_baseline()` | `BaselineChecker.check()` / `evaluate()` |
-| SQLite 两级级联 | H2 `ON DELETE CASCADE` |
-| `inspection_history` | `inspection_history` + `recordHistory()` |
+| 种子导入入口 | `InspectionConfigService.seedIfEmpty()`（两个表各自判空，幂等） |
+| 模板种子 | `inspection/templates.json` → `loadTemplateSeed()` |
+| 基线种子 | `inspection/baselines.json` → `loadBaselineSeed()` |
+| 基线判定 | `BaselineChecker.check()`，内部按算子分派到 `evaluate()` |
+| 两级级联删除 | H2 `ON DELETE CASCADE`（模板 → 章节 → 规则） |
+| 变更留痕 | `inspection_history` + `recordHistory()` |
 
 ---
 
 ## 七、巡检执行体系
 
-巡检执行**不照抄 RaccoonX**。RaccoonX 把结果直接拼成一段 HTML 报告返回、**不留历史**；
-本项目改为「执行记录 + 明细」持久化模型，报告由前端按需渲染。这样做的收益是能回答
+巡检结果落库为「执行记录 + 明细」的持久化模型，而不是执行完就丢掉。这样做的收益是能回答
 「这次和上次比，哪几条基线从不合规变成合规了」——而这正是巡检的价值所在。
 
 ### 7.1 执行状态语义
@@ -395,7 +398,7 @@ SELECT name, is_auto_close_on FROM sys.databases
 
 ### 7.4 H2 自检类型（`h2`，🧪）
 
-这是本项目为了让巡检链路**可验证**而新增的内置库类型，RaccoonX 没有对应物。
+这是为了让巡检链路**可端到端验证**而内置的库类型，不需要任何外部数据库实例。
 
 - 驱动在应用 classpath 上（H2），因此 `driver_bundled = true`：**无需上传 JAR、无需注册表记录**
 - `DynamicDriverLoader` 在这种情形下用 `getClass().getClassLoader()` 而非 `getPlatformClassLoader()`，
@@ -407,16 +410,16 @@ SELECT name, is_auto_close_on FROM sys.databases
   `h2_compress`、`h2_recompile_always`（H2 默认值与期望值不符 → 不合规），
   `h2_default_lock_timeout`（默认实例不暴露该设置 → 未采集）
 
-### 7.5 与 RaccoonX 的对应关系
+### 7.5 执行结果的可取用形态
 
-| RaccoonX（Python） | 本项目（Java） |
+| 形态 | 落点 / 接口 |
 |---|---|
-| 巡检结果拼 HTML 直接返回 | `inspection_run` + 两张明细表，报告由前端渲染 |
-| 不留历史 | `/runs` 列表 + `/runs/latest` 支持趋势对比 |
-| 单次同步执行 | `InspectionRunner.run()`，同样同步，但结果落库 |
-| — | `driver_bundled` 内置驱动（H2 自检） |
-| `GET /api/download/{taskId}` 出 Word | `GET /runs/{id}/export?format=word`（POI 真 .docx） |
-| `GET /api/download_pdf/{taskId}` 出 PDF | `GET /runs/{id}/export?format=pdf`（openhtmltopdf） |
+| 持久化 | `inspection_run` + `inspection_run_query` + `inspection_run_baseline` 三张表 |
+| 执行记录列表 | `GET /api/inspection/runs` |
+| 单次执行明细 | `GET /api/inspection/runs/{id}` |
+| 最近一次结果（用于趋势对比） | `GET /api/inspection/runs/latest` |
+| 报告导出 | `GET /api/inspection/runs/{id}/export?format=html\|word\|pdf` |
+| 免 JAR 运行 | `driver_bundled` 内置驱动（H2 自检类型） |
 
 ### 7.6 报告导出（HTML / Word / PDF）
 
@@ -729,16 +732,16 @@ java -cp "target/classes;$(cat target/cp.txt)" scripts/PdfInspect.java /tmp/r.pd
 
 ## 十、Web 控制台
 
-导航为七个顶级菜单，其中「驱动管理 / 基线规则 / 巡检历史」三处布局对齐 RaccoonX：
+导航为七个顶级菜单：
 
 | 模块 | 能力 |
 |---|---|
 | **数据源纳管** | 新建 / 编辑 / 删除数据源；按库类型动态切换表单字段（Oracle 显示 SID / Service Name）；JDBC URL 实时预览；连接测试 |
-| **驱动管理** | **两栏布局**（左 280px 库类型列表 / 右该类型的驱动版本表，对齐 RaccoonX `oracle-client` 页）。左栏列出**全部**受支持类型（含尚未放 JAR 的），这样「哪些类型还没配驱动」一眼可见——只列已有驱动的类型会把「缺失」这个最重要的信息藏起来。右栏表头：驱动版本 / 驱动类 / 驱动 JAR 包 / 操作，激活行淡绿底 + 激活徽标；支持激活切换、上传 JAR、扫描驱动目录；JAR 缺失时高亮期望路径 |
+| **驱动管理** | **两栏布局**（左 280px 库类型列表 / 右该类型的驱动版本表）。左栏列出**全部**受支持类型（含尚未放 JAR 的），这样「哪些类型还没配驱动」一眼可见——只列已有驱动的类型会把「缺失」这个最重要的信息藏起来。右栏表头：驱动版本 / 驱动类 / 驱动 JAR 包 / 操作，激活行淡绿底 + 激活徽标；支持激活切换、上传 JAR、扫描驱动目录；JAR 缺失时高亮期望路径 |
 | **巡检配置** | 两个页签：**巡检模板**（模板列表 → 章节手风琴 → 规则，支持增删改与启停）、**变更历史**（增删改留痕） |
 | **基线规则** | 按库类型管理 `参数 → 比较符 → 期望值` 阈值规则；顶部统计条（该类型基线数 / 启用中 / 全部类型合计 / 风险分布）；批量启停；填实测值跑试算，输出合规率与逐项结论 |
 | **巡检执行** | 只负责「发起 + 看本次结果」：选数据源 + 模板发起巡检，报告区展示执行状态、合规率、规则执行成功数、基线合规数；章节手风琴展开看每条规则的 SQL、耗时、行数与结果预览（NULL 以斜体区分），基线判定表 7 列（参数 / 比较符 / 期望值 / 实测值 / 结论 / 风险 / 说明） |
-| **巡检历史** | 留痕与导出。左侧执行记录列表（可按数据源 / 库类型筛选）；右侧**在线预览**，可在「报告原文」（iframe 直接加载导出的 HTML）与「结构化明细」之间切换；顶部三个下载按钮（Word 深蓝 / PDF 红 / HTML 青绿，对齐 RaccoonX `.report-dl-btn` 配色） |
+| **巡检历史** | 留痕与导出。左侧执行记录列表（可按数据源 / 库类型筛选）；右侧**在线预览**，可在「报告原文」（iframe 直接加载导出的 HTML）与「结构化明细」之间切换；顶部三个下载按钮（Word 深蓝 / PDF 红 / HTML 青绿） |
 | **SQL 编辑器** | 选择数据源执行 SQL；结果表格化（含列类型）；执行耗时；`Ctrl/Cmd + Enter` 快捷执行 |
 
 ### 为什么「在线预览」用 iframe 直接加载导出接口
@@ -770,13 +773,12 @@ db-navigator/
 │   ├── dom_smoke.js                      # jsdom 前端行为冒烟测试（82 项，不跑 CSS）
 │   ├── ui_guard.js                       # 真实浏览器 UI 守卫（38 项，headless Edge + CDP，零依赖）
 │   └── PdfInspect.java                   # PDF 报告体检：提取文本 / 嵌入字体 / 栅格化出图
-├── .reference/                           # RaccoonX 源码快照（仅作布局对照，不参与构建）
 ├── drivers/                              # JDBC 驱动 JAR 存放（按 类型/版本 分层）
 ├── src/main/resources/
 │   ├── application.yml                   # 端口、H2、连接池、自定义配置
 │   ├── schema.sql                        # 驱动 / 数据源 / 查询历史 / 巡检配置五表 / 巡检执行三表 建表
-│   ├── db-types.json                     # 库类型元数据（对齐 builtin_types.json，另加 h2 自检）
-│   ├── drivers-seed.json                 # 驱动种子（对齐 drivers_seed.json）
+│   ├── db-types.json                     # 库类型元数据（含 h2 自检类型）
+│   ├── drivers-seed.json                 # 驱动种子（仅元数据，导入时按文件名解析路径）
 │   ├── inspection/
 │   │   ├── templates.json                # 巡检模板种子（6 模板 / 113 章节 / 160 规则）
 │   │   └── baselines.json                # 基线种子（88 条，含 h2 自检组）
@@ -786,7 +788,7 @@ db-navigator/
     ├── common/            Result、PasswordEncryptor、ApiStatusAdvice
     ├── config/            DbNavProperties、ConfigJsonMapper
     ├── driver/
-    │   ├── DriverRegistry.java           # 注册表 CRUD + 激活（对齐 driver_registry.py）
+    │   ├── DriverRegistry.java           # 注册表 CRUD + 激活（同类型仅一个 is_active=1）
     │   ├── DriverPathResolver.java       # 三级路径重定位
     │   ├── DriverDirectoryScanner.java   # 目录扫描自动登记
     │   ├── DriverSeedLoader.java         # 种子导入
@@ -811,26 +813,27 @@ db-navigator/
 
 ---
 
-## 十二、与 RaccoonX 的差异说明
+## 十二、技术选型与取舍
 
-| 维度 | RaccoonX | 本项目 | 原因 |
-|---|---|---|---|
-| 语言/运行时 | Python 3.10+ | Java 17 / Spring Boot 3 | 原生 JDBC，无需 JPype 桥接 |
-| 驱动加载 | JPype 启动 JVM + `jaydebeapi` | `URLClassLoader` 直接加载 | 少一层跨语言开销与依赖 |
-| 元数据库 | SQLite `drivers.db` | H2 文件库 | Java 生态更自然 |
-| 密码加密 | Fernet | AES-256-GCM（SHA-256 派生密钥） | 无额外依赖 |
-| 巡检执行 | 内置调度器定时跑巡检，结果拼 HTML 直接返回、不留历史 | 手动发起（`POST /api/inspection/run`），结果落库为「执行记录 + 明细」，报告由前端渲染 | 保留历史才能做趋势对比；定时调度留待后续接入 |
-| 巡检报告 | 服务端拼 HTML 直接返回 | 前端渲染 + `/runs/latest` 支持「与上次对比」 | 报告与数据解耦，便于换皮与二次加工 |
-| 报告导出 | `GET /api/download/{taskId}` 出 Word、`/api/download_pdf/{taskId}` 出 PDF | `GET /runs/{id}/export?format=html\|word\|pdf`，三种格式共用一份数据 | 对齐 RaccoonX 的能力，但接口收敛为一个（`format` 参数区分），且 HTML/PDF 复用同一渲染器 |
-| 报告下载按钮 | `.report-dl-btn` 三色（Word 深蓝 / PDF 红 / 分享青） | 同配色，另加 HTML | 视觉延续 |
-| 导航结构 | 驱动管理 / 基线配置 / 巡检历史各为**独立顶级菜单** | 同（`drivers` / `baselines` / `runs`） | 对齐；基线不再塞在巡检配置的页签里 |
-| 自检能力 | 无 | 内置 `h2` 自检类型（`driver_bundled`，无需外部库） | 让整条链路可端到端验证，不靠 mock |
+| 维度 | 选择 | 原因 |
+|---|---|---|
+| 语言/运行时 | Java 17 / Spring Boot 3 | 原生 JDBC，不需要跨语言桥接 JVM |
+| 驱动加载 | `URLClassLoader` 运行时加载 | 每个 `类型::版本` 一个 ClassLoader，隔离干净；上传即生效，不用重启 |
+| 元数据库 | H2 文件库 | 零安装、随应用启动，与 Spring 生态契合 |
+| 密码加密 | AES-256-GCM（SHA-256 派生密钥） | 无额外依赖；每条记录独立随机 IV，同一明文密文不同 |
+| 巡检执行 | 手动发起（`POST /api/inspection/run`），结果落库为「执行记录 + 明细」 | 保留历史才能做趋势对比；定时调度留待后续接入 |
+| 巡检报告 | 前端按需渲染 + `/runs/latest` 支持「与上次对比」 | 报告与数据解耦，便于换皮与二次加工 |
+| 报告导出 | `GET /runs/{id}/export?format=html\|word\|pdf`，三种格式共用一份数据 | 接口收敛为一个（`format` 参数区分）；HTML/PDF 复用同一渲染器，不会出现「预览对、导出错」 |
+| 导航结构 | 驱动管理 / 基线规则 / 巡检历史各为**独立顶级菜单** | 基线配置与「发起巡检」是两件事，塞进同一个页签会让日常操作变绕 |
+| 自检能力 | 内置 `h2` 自检类型（`driver_bundled`，无需外部库） | 让整条链路可端到端验证，不靠 mock |
 
-驱动管理部分（目录约定、注册表字段、激活语义、三条自愈链路、路径重定位）与巡检配置部分
-（模板→章节→规则两级级联、基线算子语义、预置内容）**逐项对齐**，可平滑迁移驱动目录、巡检模板与基线元数据。
+几处刻意的取舍：
 
-巡检执行部分则是有意**偏离** RaccoonX：从「一次性 HTML 报告」改为「持久化执行记录 + 前端渲染报告」，
-代价是多三张表，收益是拿到了历史与趋势对比的能力。
+- **多三张表换历史**：`inspection_run` / `inspection_run_query` / `inspection_run_baseline`
+  让每次执行都可追溯，代价是数据量随执行次数增长（当前不做自动清理）。
+- **导出接口不走统一的 `Result` 包装**：它要吐原始字节流。出错时仍返回 `Result` 形状的 JSON，
+  并同时置对应的 HTTP 状态码——这样前端一套错误处理就能覆盖下载失败（如 PDF 字体缺失）。
+- **驱动 JAR 不入库**：体积大且有分发许可问题，只提交目录结构与 `drivers/<type>/README.md`。
 
 ### 一处刻意的不一致：预览服务的导出接口
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "巡检模板种子。章节目录框架对齐 RaccoonX 的 21 章结构（MySQL/PG/Oracle 各自独立）；每条 query 含 key / sql / 中英描述。所有 SQL 均针对对应数据库语法编写。",
+  "_comment": "巡检模板种子。章节目录框架为 21 章结构（MySQL/PG/Oracle 各自独立）；每条 query 含 key / sql / 中英描述。所有 SQL 均针对对应数据库语法编写。",
   "templates": [
     {
       "db_type": "oracle",

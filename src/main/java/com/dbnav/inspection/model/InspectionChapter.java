@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 巡检章节。
  *
- * 对齐 RaccoonX 的 inspection_chapter 表：
+ * 字段：
  *   template_id / chapter_number / chapter_title_zh / chapter_title_en
  *   description / enabled / sort_order
  *

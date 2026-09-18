@@ -16,7 +16,7 @@ import java.util.*;
 /**
  * REST API for SQL query execution against managed data sources.
  *
- * Aligned with RaccoonX's SQL editor feature:
+ * Endpoint:
  *   POST /api/query/{datasourceId}/execute  — execute SQL and return results
  *
  * Supports:

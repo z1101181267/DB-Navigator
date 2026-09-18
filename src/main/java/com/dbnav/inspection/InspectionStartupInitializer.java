@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * 启动时导入巡检配置种子。
  *
- * 对齐 RaccoonX 的 init_db 编排：
+ * 启动编排：
  *   1. 建表（由 schema.sql 完成）
  *   2. 表为空时导入默认模板（21 章框架）与默认基线
  *

@@ -9,10 +9,10 @@ import org.springframework.stereotype.Component;
 /**
  * Runs on application startup to initialize the driver registry.
  *
- * Aligned with RaccoonX's startup sequence:
- *   1. init_db() (done by schema.sql)
- *   2. seed_driver_registry() — import seed JSON if table empty
- *   3. scan_driver_dirs() — scan disk for JARs not yet in registry
+ * Startup sequence:
+ *   1. Create tables (done by schema.sql)
+ *   2. Import seed JSON if the registry table is empty
+ *   3. Scan disk for JARs not yet in the registry
  *
  * Order matters: seed first (sets metadata), then scan (verifies JARs on disk).
  */

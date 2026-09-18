@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 /**
  * Single entry in the drivers-seed.json file.
  *
- * Aligned with RaccoonX's drivers_seed.json format:
+ * Fields in the seed file:
  *   db_type, version, driver_class, jar_filename, file_size, is_active, note
  *
  * Note: jar_path is deliberately absent (resolved at import time by filename).
