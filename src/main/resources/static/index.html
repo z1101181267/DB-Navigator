@@ -32,10 +32,13 @@
             <span class="nav-icon">🧩</span><span>驱动管理</span>
         </button>
         <button class="nav-item" data-view="inspection">
-            <span class="nav-icon">🔍</span><span>巡检配置</span>
+            <span class="nav-icon">🔍</span><span>巡检配置管理</span>
         </button>
         <button class="nav-item" data-view="baselines">
-            <span class="nav-icon">📐</span><span>基线规则</span>
+            <span class="nav-icon">📐</span><span>基线配置管理</span>
+        </button>
+        <button class="nav-item" data-view="rules">
+            <span class="nav-icon">⚙</span><span>规则引擎</span>
         </button>
         <button class="nav-item" data-view="inspectionRun">
             <span class="nav-icon">▶</span><span>巡检执行</span>
@@ -156,10 +159,10 @@
         <section class="view" id="view-inspection">
             <div class="view-head">
                 <div>
-                    <h1>巡检配置</h1>
+                    <h1>巡检配置管理</h1>
                     <p class="sub">
-                        巡检模型：<code>模板 → 章节 → 规则</code> 两级级联，
-                        变更留痕可回溯
+                        维护巡检报告骨架：<code>模板 → 章节</code>。
+                        章节本身不存规则正文，只引用「规则引擎」里的规则，同一模板可跨章节复用同一条规则
                     </p>
                 </div>
                 <div class="head-actions">
@@ -197,11 +200,11 @@
             </div>
         </section>
 
-        <!-- ================= 基线规则 ================= -->
+        <!-- ================= 基线配置管理 ================= -->
         <section class="view" id="view-baselines">
             <div class="view-head">
                 <div>
-                    <h1>基线规则</h1>
+                    <h1>基线配置管理</h1>
                     <p class="sub">
                         按库类型维护 <code>参数 → 比较符 → 期望值</code> 阈值规则；
                         巡检执行时采集实测值逐条判定，也可在此手工试算
@@ -238,6 +241,61 @@
                 </div>
                 <div id="checkResultWrap">
                     <div class="empty">点击「运行校验」查看合规率与逐项结论</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= 规则引擎 ================= -->
+        <section class="view" id="view-rules">
+            <div class="view-head">
+                <div>
+                    <h1>规则引擎</h1>
+                    <p class="sub">
+                        规则库：一条规则 = 一段采集 SQL + 归属库类型，全局唯一存放。
+                        多个模板的章节可引用同一条规则，改一次所有引用处同时生效；可启停、可试跑
+                    </p>
+                </div>
+                <div class="head-actions">
+                    <button class="btn" id="ruleRefresh">刷新</button>
+                    <button class="btn btn-primary" id="btnNewRule">+ 新建规则</button>
+                </div>
+            </div>
+
+            <div class="stat-strip" id="ruleStats"></div>
+
+            <div class="card" style="margin-bottom:16px">
+                <div class="base-toolbar">
+                    <select class="select" id="ruleTypeSel"></select>
+                    <select class="select" id="ruleCatSel"></select>
+                    <select class="select" id="ruleStateSel">
+                        <option value="">全部状态</option>
+                        <option value="1">已启用</option>
+                        <option value="0">已停用</option>
+                    </select>
+                    <input type="text" class="rule-search" id="ruleKeyword" placeholder="搜索 key / 名称 / SQL">
+                    <span class="count" id="ruleCount"></span>
+                    <div class="spacer"></div>
+                    <button class="btn btn-sm" id="btnRuleEnableAll">全部启用</button>
+                    <button class="btn btn-sm" id="btnRuleDisableAll">全部停用</button>
+                </div>
+                <div id="ruleTableWrap"><div class="empty">加载中…</div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    规则试跑
+                    <span class="count">
+                        选一条规则 + 一个数据源立即执行：只回显结果预览，
+                        不写入巡检记录、不计入合规率
+                    </span>
+                </div>
+                <div class="base-check-toolbar">
+                    <select class="select" id="ruleTestSel"></select>
+                    <select class="select" id="ruleTestDs"></select>
+                    <button class="btn btn-primary btn-sm" id="btnRuleTest">▶ 试跑</button>
+                </div>
+                <div id="ruleTestWrap">
+                    <div class="empty">选择规则与数据源后点击「试跑」</div>
                 </div>
             </div>
         </section>
@@ -535,53 +593,78 @@
     </div>
 </div>
 
-<!-- ================= 巡检规则弹窗 ================= -->
-<div class="modal-mask" id="qModal" hidden>
+<!-- ================= 规则引擎 · 新建/编辑规则弹窗 ================= -->
+<div class="modal-mask" id="ruleModal" hidden>
     <div class="modal">
         <div class="modal-head">
-            <h2 id="qModalTitle">新建巡检规则</h2>
-            <button class="icon-btn" data-close="qModal">✕</button>
+            <h2 id="ruleModalTitle">新建规则</h2>
+            <button class="icon-btn" data-close="ruleModal">✕</button>
         </div>
         <div class="modal-body">
-            <input type="hidden" id="qId">
-            <input type="hidden" id="qChapterId">
+            <input type="hidden" id="ruleId">
             <div class="grid-2">
                 <label class="field">
                     <span>规则 Key <em>*</em></span>
-                    <input type="text" id="qKey" placeholder="如 mysql_connections">
+                    <input type="text" id="ruleKey" placeholder="如 mysql_connections">
                 </label>
                 <label class="field">
-                    <span>排序</span>
-                    <input type="number" id="qSort">
+                    <span>归属库类型 <em>*</em></span>
+                    <select id="ruleDbType"></select>
+                </label>
+                <label class="field">
+                    <span>规则名称（中文） <em>*</em></span>
+                    <input type="text" id="ruleNameZh" placeholder="如：连接数使用率">
+                </label>
+                <label class="field">
+                    <span>规则名称（英文）</span>
+                    <input type="text" id="ruleNameEn">
                 </label>
             </div>
+            <label class="field">
+                <span>建议归类章节</span>
+                <input type="text" id="ruleCategory" placeholder="如：连接与会话（仅供规则库筛选，不构成绑定）">
+            </label>
             <label class="field">
                 <span>SQL 语句 <em>*</em></span>
-                <textarea id="qSql" class="sql-area" spellcheck="false"
+                <textarea id="ruleSql" class="sql-area" spellcheck="false"
                           placeholder="SHOW GLOBAL STATUS LIKE 'Threads_connected';"></textarea>
             </label>
-            <div class="grid-2">
-                <label class="field">
-                    <span>描述（中文）</span>
-                    <input type="text" id="qDescZh">
-                </label>
-                <label class="field">
-                    <span>描述（英文）</span>
-                    <input type="text" id="qDescEn">
-                </label>
-            </div>
             <label class="field">
                 <span>状态</span>
-                <select id="qEnabled">
+                <select id="ruleEnabled">
                     <option value="1">启用</option>
                     <option value="0">停用</option>
                 </select>
             </label>
+            <div class="count" id="ruleModalHint" hidden></div>
         </div>
         <div class="modal-foot">
             <div class="spacer"></div>
-            <button class="btn" data-close="qModal">取消</button>
-            <button class="btn btn-primary" id="btnSaveQ">保存</button>
+            <button class="btn" data-close="ruleModal">取消</button>
+            <button class="btn btn-primary" id="btnSaveRule">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ================= 章节引用的规则弹窗 ================= -->
+<div class="modal-mask" id="bindModal" hidden>
+    <div class="modal">
+        <div class="modal-head">
+            <h2>章节引用的规则</h2>
+            <button class="icon-btn" data-close="bindModal">✕</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="bindChapterId">
+            <div class="count" id="bindChapterInfo"></div>
+            <div class="base-toolbar">
+                <select class="select" id="bindRuleSel"></select>
+                <button class="btn btn-sm btn-primary" id="btnBindRule">+ 绑定</button>
+            </div>
+            <div id="bindListWrap"><div class="empty">加载中…</div></div>
+        </div>
+        <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn" data-close="bindModal">关闭</button>
         </div>
     </div>
 </div>

@@ -16,12 +16,27 @@ const state = {
         summary: null,
         templates: [],
         activeTplId: null,
-        tree: null,        // 当前模板（含 chapters[].queries[]）
+        tree: null,        // 当前模板（含 chapters[].rules[]，rules 是引用来的规则，不是正文）
         baselines: [],
         baseType: null,
         values: {},        // paramName -> 实测值
         history: null,
         openChapters: {}   // chapterId -> true
+    },
+    rules: {
+        loaded: false,
+        list: [],          // InspectionRule[]（规则库）
+        stats: null,
+        categories: [],
+        dbType: null,
+        category: '',
+        enabled: '',       // '' = 全部 | '1' = 已启用 | '0' = 已停用
+        keyword: '',
+        testResult: null,
+        testRuleId: null,
+        // 章节引用规则弹窗
+        bindChapterId: null,
+        bindList: []
     },
     run: {
         loaded: false,
@@ -199,8 +214,11 @@ function bindEvents() {
     // Inspection
     bindInspectionEvents();
 
-    // 基线规则（独立菜单）
+    // 基线配置管理（独立菜单）
     bindBaselineEvents();
+
+    // 规则引擎（独立菜单）
+    bindRuleEvents();
 
     // 巡检执行
     bindRunEvents();
@@ -220,6 +238,7 @@ function switchView(name) {
     if (name === 'query') renderQueryDsSelect();
     if (name === 'inspection') ensureInspection();
     if (name === 'baselines') ensureBaselines();
+    if (name === 'rules') ensureRules();
     if (name === 'inspectionRun') ensureRunExec();
     if (name === 'runs') ensureRunsHistory();
 }
@@ -791,8 +810,8 @@ function bindInspectionEvents() {
     // Chapter modal
     $('btnSaveCh').addEventListener('click', saveCh);
 
-    // Query modal
-    $('btnSaveQ').addEventListener('click', saveQ);
+    // 章节引用规则弹窗（规则正文在规则引擎页维护，这里只做绑定）
+    $('btnBindRule').addEventListener('click', bindRuleToChapter);
 
     $('btnSaveBase').addEventListener('click', saveBase);
 
@@ -902,17 +921,17 @@ function renderInspStats() {
         <div class="stat-card">
             <div class="stat-num">${s.templateCount || 0}</div>
             <div class="stat-label">巡检模板</div>
-            <div class="stat-sub">覆盖 ${Object.keys(s.baselineCountByType || {}).length} 种数据库</div>
+            <div class="stat-sub">覆盖 ${(s.byDbType || []).length} 种数据库</div>
         </div>
         <div class="stat-card">
             <div class="stat-num">${s.totalChapters || 0}</div>
             <div class="stat-label">巡检章节</div>
-            <div class="stat-sub">每模板 21 个巡检维度</div>
+            <div class="stat-sub">报告骨架：模板 → 章节</div>
         </div>
         <div class="stat-card">
-            <div class="stat-num">${s.totalQueries || 0}</div>
-            <div class="stat-label">巡检规则</div>
-            <div class="stat-sub">模板 → 章节 → 规则 两级级联</div>
+            <div class="stat-num">${s.totalRules || 0}</div>
+            <div class="stat-label">规则库</div>
+            <div class="stat-sub">章节引用 ${s.totalBindings || 0} 条</div>
         </div>
         <div class="stat-card">
             <div class="stat-num">${baseTotal}</div>
@@ -987,27 +1006,27 @@ function renderTplDetail() {
     }
 
     const chapters = t.chapters || [];
-    const qTotal = chapters.reduce((n, c) => n + (c.queries || []).length, 0);
+    const rTotal = chapters.reduce((n, c) => n + (c.rules || []).length, 0);
 
     const chHtml = chapters.length ? chapters.map(c => {
         const open = !!state.inspection.openChapters[c.id];
-        const qs = c.queries || [];
-        const qHtml = qs.length ? qs.map(q => `
-            <div class="q-row ${q.enabled ? '' : 'row-off'}">
+        const rs = c.rules || [];
+        const rHtml = rs.length ? rs.map(r => `
+            <div class="q-row ${r.enabled ? '' : 'row-off'}">
                 <div class="q-row-top">
-                    <span class="q-key">${esc(q.key)}</span>
-                    ${q.enabled ? '' : '<span class="badge badge-soft">已停用</span>'}
+                    <span class="q-key">${esc(r.ruleKey)}</span>
+                    <span class="q-name">${esc(r.ruleNameZh || '')}</span>
+                    ${r.enabled ? '' : '<span class="badge badge-soft">规则已停用</span>'}
+                    ${r.refCount > 1 ? `<span class="badge badge-soft">另被 ${r.refCount - 1} 处引用</span>` : ''}
                     <span class="q-acts">
-                        <button class="btn-link" data-edit-q="${q.id}" data-ch="${c.id}">编辑</button>
-                        <button class="btn-link" data-toggle-q="${q.id}" data-ch="${c.id}" data-on="${q.enabled ? 0 : 1}">
-                            ${q.enabled ? '停用' : '启用'}</button>
-                        <button class="btn-link danger" data-del-q="${q.id}" data-ch="${c.id}">删除</button>
+                        <button class="btn-link" data-edit-rule="${r.id}">编辑</button>
+                        <button class="btn-link danger" data-unbind-rule="${r.id}" data-ch="${c.id}">解绑</button>
                     </span>
                 </div>
-                ${q.desc_zh || q.desc_en ? `<div class="q-desc">${esc(q.desc_zh || q.desc_en)}</div>` : ''}
-                <div class="q-sql">${esc(q.sql)}</div>
+                ${r.ruleNameEn ? `<div class="q-desc">${esc(r.ruleNameEn)}</div>` : ''}
+                <div class="q-sql">${esc(r.ruleSql)}</div>
             </div>`).join('')
-            : '<div class="empty" style="padding:14px">该章节暂无巡检规则</div>';
+            : '<div class="empty" style="padding:14px">该章节尚未引用规则，点击下方按钮从规则库中挑选</div>';
 
         return `<div class="chap ${open ? 'open' : ''}" data-chap="${c.id}">
             <div class="chap-head" data-chap-toggle="${c.id}">
@@ -1019,14 +1038,15 @@ function renderTplDetail() {
                 </span>
                 <span class="chap-acts">
                     <span class="badge ${c.enabled ? 'badge-soft' : 'badge-warn'}">${c.enabled ? '启用' : '停用'}</span>
-                    <span class="count">${qs.length} 条规则</span>
+                    <span class="count">${rs.length} 条规则</span>
+                    <button class="btn-link" data-bind-rule="${c.id}">引用规则</button>
                     <button class="btn-link" data-edit-ch="${c.id}">编辑</button>
                     <button class="btn-link danger" data-del-ch="${c.id}">删除</button>
                 </span>
             </div>
             <div class="chap-body">
-                ${qHtml}
-                <button class="btn btn-sm" data-new-q="${c.id}">+ 新增规则</button>
+                ${rHtml}
+                <button class="btn btn-sm" data-bind-rule="${c.id}">+ 引用规则</button>
             </div>
         </div>`;
     }).join('')
@@ -1047,7 +1067,7 @@ function renderTplDetail() {
                 </div>
             </div>
             <div class="detail-actions">
-                <span class="count">${chapters.length} 章 / ${qTotal} 条规则</span>
+                <span class="count">${chapters.length} 章 / ${rTotal} 条规则引用</span>
                 <button class="btn btn-sm" data-act="new-ch">+ 新增章节</button>
                 <button class="btn btn-sm" data-act="edit-tpl">编辑模板</button>
                 ${t.isDefault ? '' : '<button class="btn btn-sm" data-act="default-tpl">设为默认</button>'}
@@ -1080,15 +1100,13 @@ function renderTplDetail() {
     wrap.querySelectorAll('[data-del-ch]').forEach(b =>
         b.addEventListener('click', () => deleteCh(+b.dataset.delCh)));
 
-    // 规则操作
-    wrap.querySelectorAll('[data-new-q]').forEach(b =>
-        b.addEventListener('click', () => openQModal(+b.dataset.newQ, null)));
-    wrap.querySelectorAll('[data-edit-q]').forEach(b =>
-        b.addEventListener('click', () => openQModal(+b.dataset.ch, +b.dataset.editQ)));
-    wrap.querySelectorAll('[data-del-q]').forEach(b =>
-        b.addEventListener('click', () => deleteQ(+b.dataset.delQ)));
-    wrap.querySelectorAll('[data-toggle-q]').forEach(b =>
-        b.addEventListener('click', () => toggleQ(+b.dataset.toggleQ, b.dataset.on === '1')));
+    // 规则引用操作（规则正文在「规则引擎」页维护，这里只做引用关系）
+    wrap.querySelectorAll('[data-bind-rule]').forEach(b =>
+        b.addEventListener('click', () => openBindModal(+b.dataset.bindRule)));
+    wrap.querySelectorAll('[data-unbind-rule]').forEach(b =>
+        b.addEventListener('click', () => unbindRule(+b.dataset.ch, +b.dataset.unbindRule)));
+    wrap.querySelectorAll('[data-edit-rule]').forEach(b =>
+        b.addEventListener('click', () => openRuleModal(+b.dataset.editRule)));
 }
 
 /* ---------------- 模板 CRUD ---------------- */
@@ -1261,8 +1279,9 @@ async function saveCh() {
 async function deleteCh(chId) {
     const chapters = (state.inspection.tree && state.inspection.tree.chapters) || [];
     const c = chapters.find(x => x.id === chId);
-    const n = c ? (c.queries || []).length : 0;
-    if (!confirm(`确定删除章节「${c ? c.chapterTitleZh : chId}」？\n其下 ${n} 条规则将级联删除，不可恢复。`)) return;
+    const n = c ? (c.rules || []).length : 0;
+    if (!confirm(`确定删除章节「${c ? c.chapterTitleZh : chId}」？\n` +
+        `该章引用的 ${n} 条规则会随之解绑，但规则本身仍保留在规则库中，其他模板不受影响。`)) return;
     try {
         await api(`/api/inspection/chapters/${chId}`, { method: 'DELETE' });
         toast('章节已删除', 'ok');
@@ -1272,97 +1291,551 @@ async function deleteCh(chId) {
     }
 }
 
-/* ---------------- 规则 CRUD ---------------- */
+/* ============================================================
+   规则引擎（规则库）
+   ============================================================ */
 
-function openQModal(chapterId, qId) {
-    const isEdit = qId !== null;
-    $('qModalTitle').textContent = isEdit ? '编辑巡检规则' : '新增巡检规则';
-    $('qId').value = isEdit ? qId : '';
-    $('qChapterId').value = chapterId;
+function bindRuleEvents() {
+    $('ruleRefresh').addEventListener('click', () => loadRules(true));
+    $('btnNewRule').addEventListener('click', () => openRuleModal(null));
+    $('btnSaveRule').addEventListener('click', saveRule);
 
-    const chapters = (state.inspection.tree && state.inspection.tree.chapters) || [];
-    const ch = chapters.find(x => x.id === chapterId);
-    const q = isEdit && ch ? (ch.queries || []).find(x => x.id === qId) : null;
+    $('ruleTypeSel').addEventListener('change', () => {
+        state.rules.dbType = $('ruleTypeSel').value;
+        state.rules.category = '';        // 换了库类型，原分类多半不存在了
+        loadRules(true);
+    });
+    $('ruleCatSel').addEventListener('change', () => {
+        state.rules.category = $('ruleCatSel').value;
+        loadRules(true);
+    });
+    $('ruleStateSel').addEventListener('change', () => {
+        state.rules.enabled = $('ruleStateSel').value;
+        loadRules(true);
+    });
 
-    if (isEdit && q) {
-        $('qKey').value = q.key || '';
-        $('qKey').disabled = true;                   // 规则 key 创建后不可变
-        $('qSql').value = q.sql || '';
-        $('qDescZh').value = q.desc_zh || '';
-        $('qDescEn').value = q.desc_en || '';
-        $('qSort').value = q.sortOrder || 0;
-        $('qEnabled').value = q.enabled ? '1' : '0';
-    } else {
-        $('qKey').disabled = false;
-        $('qKey').value = '';
-        $('qSql').value = '';
-        $('qDescZh').value = '';
-        $('qDescEn').value = '';
-        $('qSort').value = 0;
-        $('qEnabled').value = '1';
-    }
-    openModal('qModal');
+    // 搜索防抖：边打字边请求既浪费也会让结果乱序闪烁
+    let kwTimer = null;
+    $('ruleKeyword').addEventListener('input', () => {
+        clearTimeout(kwTimer);
+        kwTimer = setTimeout(() => {
+            state.rules.keyword = $('ruleKeyword').value.trim();
+            loadRules(true);
+        }, 250);
+    });
+
+    $('btnRuleEnableAll').addEventListener('click', () => bulkRules(true));
+    $('btnRuleDisableAll').addEventListener('click', () => bulkRules(false));
+    $('btnRuleTest').addEventListener('click', runRuleTest);
+    $('ruleTestSel').addEventListener('change', () => {
+        const v = $('ruleTestSel').value;
+        state.rules.testRuleId = v ? +v : null;
+        state.rules.testResult = null;
+        renderRuleTest();
+    });
 }
 
-async function saveQ() {
-    const id = $('qId').value;
+async function ensureRules() {
+    if (state.rules.loaded) return;
+    await loadRules(false);
+}
+
+function fillRuleTypeSelect() {
+    const opts = state.dbTypes
+        .map(t => `<option value="${esc(t.dbType)}">${esc(t.emoji || '')} ${esc(t.label || t.dbType)}</option>`)
+        .join('');
+    $('ruleTypeSel').innerHTML = opts;
+    $('ruleDbType').innerHTML = opts;
+    if (!state.rules.dbType) {
+        state.rules.dbType = state.dbTypes.length ? state.dbTypes[0].dbType : null;
+    }
+    if (state.rules.dbType) $('ruleTypeSel').value = state.rules.dbType;
+}
+
+async function loadRules(force) {
+    const r = state.rules;
+    if (r.loaded && !force) return;
+    if (!$('ruleTypeSel').options.length) fillRuleTypeSelect();
+
+    const qs = new URLSearchParams();
+    if (r.dbType) qs.set('dbType', r.dbType);
+    if (r.category) qs.set('category', r.category);
+    if (r.enabled !== '') qs.set('enabled', r.enabled);
+    if (r.keyword) qs.set('keyword', r.keyword);
+
+    try {
+        const [list, stats, cats] = await Promise.all([
+            api('/api/inspection/rules?' + qs.toString()),
+            api('/api/inspection/rules/stats'),
+            api('/api/inspection/rules/categories'
+                + (r.dbType ? '?dbType=' + encodeURIComponent(r.dbType) : ''))
+        ]);
+        r.list = list || [];
+        r.stats = stats || null;
+        r.categories = cats || [];
+        r.loaded = true;
+    } catch (e) {
+        r.list = [];
+        toast('加载规则库失败：' + e.message, 'bad');
+    }
+    fillRuleCatSelect();
+    renderRuleStats();
+    renderRuleTable();
+    fillRuleTestSelect();
+}
+
+function fillRuleCatSelect() {
+    const cur = state.rules.category || '';
+    $('ruleCatSel').innerHTML = ['<option value="">全部章节</option>']
+        .concat((state.rules.categories || [])
+            .map(c => `<option value="${esc(c)}">${esc(c)}</option>`))
+        .join('');
+    // 分类列表随库类型变化，旧选中项可能已不存在，这里以实际生效值为准
+    $('ruleCatSel').value = cur;
+    state.rules.category = $('ruleCatSel').value || '';
+}
+
+/** 规则引擎页顶部统计条 */
+function renderRuleStats() {
+    const st = state.rules.stats;
+    if (!st) { $('ruleStats').innerHTML = ''; return; }
+
+    const byType = st.byDbType || {};
+    const chips = Object.entries(byType)
+        .map(([k, v]) => `<span class="badge badge-soft">${esc(typeMeta(k).label || k)} ${esc(v)}</span>`)
+        .join(' ') || '<span class="count">—</span>';
+
+    $('ruleStats').innerHTML = `
+        <div class="stat-card">
+            <div class="stat-num">${st.total || 0}</div>
+            <div class="stat-label">规则总数</div>
+            <div class="stat-sub">启用 ${st.enabled || 0} · 停用 ${st.disabled || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-num">${st.unbound || 0}</div>
+            <div class="stat-label">未被任何章节引用</div>
+            <div class="stat-sub">${st.unbound ? '这些规则不会参与巡检' : '全部规则都已挂到章节上'}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-num">${Object.keys(byType).length}</div>
+            <div class="stat-label">覆盖库类型</div>
+            <div class="stat-sub">${chips}</div>
+        </div>`;
+}
+
+function renderRuleTable() {
+    const list = state.rules.list || [];
+    const enabled = list.filter(r => r.enabled).length;
+    $('ruleCount').textContent = `${list.length} 条（启用 ${enabled}）`;
+
+    const wrap = $('ruleTableWrap');
+    if (!list.length) {
+        wrap.innerHTML = '<div class="empty" style="padding:24px">' +
+            '没有符合条件的规则，调整筛选条件或点击「新建规则」</div>';
+        return;
+    }
+
+    const rows = list.map(r => {
+        const usedBy = r.usedBy || [];
+        const usedText = usedBy.length
+            ? usedBy.map(u => `<span class="badge badge-soft">${esc(u)}</span>`).join(' ')
+            : '<span class="count">未被引用</span>';
+        return `<tr class="${r.enabled ? '' : 'row-off'}">
+            <td class="mono shrink">${esc(r.ruleKey)}</td>
+            <td>
+                ${esc(r.ruleNameZh || '')}
+                ${r.ruleNameEn ? `<div class="q-desc">${esc(r.ruleNameEn)}</div>` : ''}
+            </td>
+            <td class="shrink">${esc(typeMeta(r.dbType).label || r.dbType)}</td>
+            <td class="shrink">${esc(r.category || '—')}</td>
+            <td class="shrink">
+                <span class="badge ${r.enabled ? 'badge-soft' : 'badge-warn'}">${r.enabled ? '启用' : '停用'}</span>
+            </td>
+            <td class="shrink">${r.refCount || 0}</td>
+            <td class="shrink">${usedText}</td>
+            <td class="right shrink">
+                <button class="btn-link" data-test-rule="${r.id}">试跑</button>
+                <button class="btn-link" data-edit-rule="${r.id}">编辑</button>
+                <button class="btn-link" data-toggle-rule="${r.id}" data-on="${r.enabled ? 0 : 1}">
+                    ${r.enabled ? '停用' : '启用'}</button>
+                <button class="btn-link danger" data-del-rule="${r.id}">删除</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `<table class="table">
+        <thead><tr>
+            <th>规则 Key</th><th>名称</th><th>库类型</th><th>建议章节</th>
+            <th>状态</th><th>引用</th><th>被谁引用</th><th class="right">操作</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+
+    wrap.querySelectorAll('[data-edit-rule]').forEach(b =>
+        b.addEventListener('click', () => openRuleModal(+b.dataset.editRule)));
+    wrap.querySelectorAll('[data-toggle-rule]').forEach(b =>
+        b.addEventListener('click', () => toggleRule(+b.dataset.toggleRule, b.dataset.on === '1')));
+    wrap.querySelectorAll('[data-del-rule]').forEach(b =>
+        b.addEventListener('click', () => deleteRule(+b.dataset.delRule)));
+    wrap.querySelectorAll('[data-test-rule]').forEach(b =>
+        b.addEventListener('click', () => {
+            const id = b.dataset.testRule;
+            state.rules.testRuleId = +id;
+            state.rules.testResult = null;
+            $('ruleTestSel').value = id;
+            runRuleTest();
+        }));
+}
+
+/* ---------------- 规则 CRUD ---------------- */
+
+async function openRuleModal(id) {
+    const isEdit = id !== null;
+    $('ruleModalTitle').textContent = isEdit ? '编辑规则' : '新建规则';
+    $('ruleId').value = isEdit ? id : '';
+    $('ruleModalHint').hidden = true;
+
+    let r = null;
+    if (isEdit) {
+        r = (state.rules.list || []).find(x => x.id === id) || null;
+        // 从模板页点进来时，该规则可能被当前筛选条件挡在外面，回源取一次
+        if (!r) {
+            try {
+                r = await api(`/api/inspection/rules/${id}`);
+            } catch (e) {
+                toast('加载规则失败：' + e.message, 'bad');
+                return;
+            }
+        }
+    }
+
+    if (!$('ruleDbType').options.length) fillRuleTypeSelect();
+
+    if (r) {
+        const preset = r.source === 'PRESET';
+        $('ruleKey').value = r.ruleKey || '';
+        $('ruleKey').disabled = preset;      // 预置规则的 key 与库类型不可改：改了等于换一条规则
+        $('ruleDbType').value = r.dbType || '';
+        $('ruleDbType').disabled = preset;
+        $('ruleNameZh').value = r.ruleNameZh || '';
+        $('ruleNameEn').value = r.ruleNameEn || '';
+        $('ruleCategory').value = r.category || '';
+        $('ruleSql').value = r.ruleSql || '';
+        $('ruleEnabled').value = r.enabled ? '1' : '0';
+
+        const refs = r.refCount || 0;
+        $('ruleModalHint').hidden = false;
+        $('ruleModalHint').textContent = refs
+            ? `该规则被 ${refs} 处引用（${(r.usedBy || []).join('、')}），修改后所有引用它的模板同时生效`
+            : '该规则目前没有被任何章节引用，修改只影响规则库本身';
+    } else {
+        $('ruleKey').disabled = false;
+        $('ruleDbType').disabled = false;
+        $('ruleKey').value = '';
+        $('ruleDbType').value = state.rules.dbType || '';
+        $('ruleNameZh').value = '';
+        $('ruleNameEn').value = '';
+        $('ruleCategory').value = state.rules.category || '';
+        $('ruleSql').value = '';
+        $('ruleEnabled').value = '1';
+    }
+    openModal('ruleModal');
+}
+
+async function saveRule() {
+    const id = $('ruleId').value;
     const body = {
-        chapterId: +$('qChapterId').value,
-        key: $('qKey').value.trim(),
-        sql: $('qSql').value.trim(),
-        desc_zh: $('qDescZh').value.trim(),
-        desc_en: $('qDescEn').value.trim(),
-        sortOrder: parseInt($('qSort').value, 10) || 0,
-        enabled: $('qEnabled').value === '1' ? 1 : 0
+        ruleKey: $('ruleKey').value.trim(),
+        dbType: $('ruleDbType').value,
+        ruleNameZh: $('ruleNameZh').value.trim(),
+        ruleNameEn: $('ruleNameEn').value.trim(),
+        category: $('ruleCategory').value.trim(),
+        ruleSql: $('ruleSql').value.trim(),
+        enabled: $('ruleEnabled').value === '1' ? 1 : 0
     };
-    if (!id && !body.key) { toast('请填写规则 Key', 'bad'); return; }
-    if (!body.sql) { toast('请填写 SQL 语句', 'bad'); return; }
+    if (!body.ruleKey) { toast('请填写规则 Key', 'bad'); return; }
+    if (!body.dbType) { toast('请选择归属库类型', 'bad'); return; }
+    if (!body.ruleNameZh) { toast('请填写规则名称', 'bad'); return; }
+    if (!body.ruleSql) { toast('请填写 SQL 语句', 'bad'); return; }
 
     try {
         if (id) {
-            delete body.key;                         // key 不可更新
-            await api(`/api/inspection/queries/${id}`, {
+            await api(`/api/inspection/rules/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
             toast('规则已更新', 'ok');
         } else {
-            await api('/api/inspection/queries', {
+            await api('/api/inspection/rules', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body)
             });
             toast('规则已创建', 'ok');
         }
-        closeModal('qModal');
-        await reloadTree();
+        closeModal('ruleModal');
+        await afterRuleChange();
     } catch (e) {
         toast('保存失败：' + e.message, 'bad');
     }
 }
 
-async function toggleQ(qId, enabled) {
+async function toggleRule(id, enabled) {
     try {
-        await api(`/api/inspection/queries/${qId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: enabled ? 1 : 0 })
-        });
-        await reloadTree();
+        await api(`/api/inspection/rules/${id}/enabled?enabled=${enabled}`, { method: 'POST' });
+        toast(enabled ? '规则已启用' : '规则已停用', 'ok');
+        await afterRuleChange();
     } catch (e) {
         toast('操作失败：' + e.message, 'bad');
     }
 }
 
-async function deleteQ(qId) {
-    if (!confirm('确定删除该巡检规则？')) return;
+async function deleteRule(id) {
+    const r = (state.rules.list || []).find(x => x.id === id);
+    const refs = r ? (r.refCount || 0) : 0;
+    const name = r ? r.ruleKey : id;
+
+    // 被引用的规则默认拒绝删除（后端也拦一道），先讲清后果再带上 force
+    if (refs) {
+        if (!confirm(`规则「${name}」正被 ${refs} 处章节引用。\n` +
+            `删除会一并解除这些引用，相关模板的巡检报告将不再包含这条规则。\n\n确定删除？`)) return;
+        try {
+            await api(`/api/inspection/rules/${id}?force=true`, { method: 'DELETE' });
+            toast('规则及其引用已删除', 'ok');
+            await afterRuleChange();
+        } catch (e) {
+            toast('删除失败：' + e.message, 'bad');
+        }
+        return;
+    }
+
+    if (!confirm(`确定删除规则「${name}」？`)) return;
     try {
-        await api(`/api/inspection/queries/${qId}`, { method: 'DELETE' });
+        await api(`/api/inspection/rules/${id}`, { method: 'DELETE' });
         toast('规则已删除', 'ok');
-        await reloadTree();
+        await afterRuleChange();
     } catch (e) {
         toast('删除失败：' + e.message, 'bad');
+    }
+}
+
+async function bulkRules(enabled) {
+    const dbType = state.rules.dbType;
+    if (!dbType) return;
+    if (!confirm(`确定将 ${typeMeta(dbType).label || dbType} 的全部规则${enabled ? '启用' : '停用'}？\n` +
+        `启停是规则级的，会同时影响所有引用这些规则的模板。`)) return;
+    try {
+        const r = await api(
+            `/api/inspection/rules/enabled?dbType=${encodeURIComponent(dbType)}&enabled=${enabled}`,
+            { method: 'POST' });
+        toast(`已${enabled ? '启用' : '停用'} ${r.affected} 条规则`, 'ok');
+        await afterRuleChange();
+    } catch (e) {
+        toast('批量操作失败：' + e.message, 'bad');
+    }
+}
+
+/** 规则改动后：规则库、当前模板树、总览统计都要跟着刷新 */
+async function afterRuleChange() {
+    await loadRules(true);
+    if (state.inspection.activeTplId) {
+        try {
+            state.inspection.tree =
+                await api(`/api/inspection/templates/${state.inspection.activeTplId}/tree`);
+            renderTplDetail();
+        } catch (e) { /* 模板页没打开时失败无所谓 */ }
+    }
+    await refreshSummary();
+}
+
+/* ---------------- 规则试跑 ---------------- */
+
+function fillRuleTestSelect() {
+    const list = state.rules.list || [];
+    const cur = state.rules.testRuleId;
+    $('ruleTestSel').innerHTML = ['<option value="">— 选择规则 —</option>']
+        .concat(list.map(r =>
+            `<option value="${r.id}">${esc(r.ruleKey)} · ${esc(r.ruleNameZh || '')}</option>`))
+        .join('');
+    if (cur && list.some(r => r.id === cur)) $('ruleTestSel').value = cur;
+
+    const ds = state.datasources || [];
+    let curDs = $('ruleTestDs').value;
+    // 默认选中第一个数据源：否则行内「试跑」点下去只会弹「请先选择数据源」，
+    // 而面板里那个下拉本身就摆在眼前，选中项随时可改。
+    if (!curDs && ds.length) curDs = String(ds[0].id);
+    $('ruleTestDs').innerHTML = ['<option value="">— 选择数据源 —</option>']
+        .concat(ds.map(d =>
+            `<option value="${d.id}">${esc(d.name)}（${esc(typeMeta(d.dbType).label || d.dbType)}）</option>`))
+        .join('');
+    if (curDs && ds.some(d => String(d.id) === curDs)) $('ruleTestDs').value = curDs;
+}
+
+async function runRuleTest() {
+    const ruleId = $('ruleTestSel').value ? +$('ruleTestSel').value : null;
+    const dsId = $('ruleTestDs').value ? +$('ruleTestDs').value : null;
+    if (!ruleId) { toast('请先选择一条规则', 'bad'); return; }
+    if (!dsId) { toast('请先选择数据源', 'bad'); return; }
+
+    $('ruleTestWrap').innerHTML = '<div class="empty">执行中…</div>';
+    try {
+        state.rules.testResult = await api(`/api/inspection/rules/${ruleId}/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataSourceId: dsId })
+        });
+    } catch (e) {
+        // 预览服务没有 JDBC 能力，会明确回 501；如实展示，不伪造结果
+        state.rules.testResult = { status: 'FAILED', errorMsg: e.message };
+    }
+    renderRuleTest();
+}
+
+function renderRuleTest() {
+    const wrap = $('ruleTestWrap');
+    const res = state.rules.testResult;
+    if (!res) {
+        wrap.innerHTML = '<div class="empty">选择规则与数据源后点击「试跑」</div>';
+        return;
+    }
+
+    const ok = res.status === 'OK';
+    const cols = res.columns || [];
+    const rows = res.rows || [];
+    const head = cols.length ? `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>` : '';
+    const body = rows.length
+        ? rows.map(r => {
+            const cells = Array.isArray(r) ? r : cols.map(c => r[c]);
+            return `<tr>${cells.map(v =>
+                `<td class="mono">${esc(v === null || v === undefined ? '—' : v)}</td>`).join('')}</tr>`;
+        }).join('')
+        : `<tr><td colspan="${Math.max(cols.length, 1)}" class="count">无数据行</td></tr>`;
+
+    wrap.innerHTML = `
+        <div class="test-meta">
+            <span class="badge ${ok ? 'badge-ok' : 'badge-bad'}">${esc(res.status || '—')}</span>
+            <span class="count">耗时 ${esc(res.elapsedMs ?? '—')} ms</span>
+            <span class="count">返回 ${esc(res.rowCount ?? 0)} 行</span>
+            ${res.truncated ? '<span class="badge badge-warn">结果已截断</span>' : ''}
+            ${res.dbTypeMismatch ? '<span class="badge badge-warn">规则库类型与数据源不一致</span>' : ''}
+        </div>
+        ${res.errorMsg ? `<div class="empty" style="color:var(--danger);padding:14px">${esc(res.errorMsg)}</div>` : ''}
+        ${cols.length ? `<div class="table-scroll"><table class="table">${head}<tbody>${body}</tbody></table></div>` : ''}`;
+}
+
+/* ---------------- 章节 ↔ 规则 绑定 ---------------- */
+
+async function openBindModal(chapterId) {
+    state.rules.bindChapterId = chapterId;
+    const chapters = (state.inspection.tree && state.inspection.tree.chapters) || [];
+    const ch = chapters.find(c => c.id === chapterId);
+    $('bindChapterInfo').textContent = ch
+        ? `第 ${ch.chapterNumber} 章 · ${ch.chapterTitleZh}` +
+          (ch.chapterTitleEn ? ` · ${ch.chapterTitleEn}` : '')
+        : `章节 #${chapterId}`;
+
+    $('bindListWrap').innerHTML = '<div class="empty">加载中…</div>';
+    openModal('bindModal');
+    await refreshBindList();
+    await fillBindRuleSelect();
+}
+
+async function refreshBindList() {
+    const chapterId = state.rules.bindChapterId;
+    if (!chapterId) return;
+    try {
+        state.rules.bindList = await api(`/api/inspection/chapters/${chapterId}/rules`) || [];
+    } catch (e) {
+        state.rules.bindList = [];
+        toast('加载章节引用失败：' + e.message, 'bad');
+    }
+    renderBindList();
+}
+
+function renderBindList() {
+    const list = state.rules.bindList || [];
+    const wrap = $('bindListWrap');
+    if (!list.length) {
+        wrap.innerHTML = '<div class="empty" style="padding:18px">该章节尚未引用任何规则</div>';
+        return;
+    }
+    wrap.innerHTML = `<table class="table">
+        <thead><tr>
+            <th>规则 Key</th><th>名称</th><th>状态</th><th class="right">操作</th>
+        </tr></thead>
+        <tbody>${list.map(r => `<tr class="${r.enabled ? '' : 'row-off'}">
+            <td class="mono shrink">${esc(r.ruleKey)}</td>
+            <td>${esc(r.ruleNameZh || '')}</td>
+            <td class="shrink">
+                <span class="badge ${r.enabled ? 'badge-soft' : 'badge-warn'}">${r.enabled ? '启用' : '停用'}</span>
+            </td>
+            <td class="right shrink">
+                <button class="btn-link danger" data-unbind="${r.id}">解绑</button>
+            </td>
+        </tr>`).join('')}</tbody></table>`;
+
+    wrap.querySelectorAll('[data-unbind]').forEach(b =>
+        b.addEventListener('click', () => unbindRule(state.rules.bindChapterId, +b.dataset.unbind)));
+}
+
+async function fillBindRuleSelect() {
+    const chapterId = state.rules.bindChapterId;
+    const chapters = (state.inspection.tree && state.inspection.tree.chapters) || [];
+    const dbType = (state.inspection.tree && state.inspection.tree.dbType) || null;
+    const bound = new Set((state.rules.bindList || []).map(r => r.id));
+
+    // 只列同库类型的规则：别的库的 SQL 在这台上跑不通，列出来只会误导
+    let pool = state.rules.list || [];
+    if (dbType) {
+        pool = pool.filter(r => r.dbType === dbType);
+        if (!pool.length) {
+            try {
+                pool = await api(`/api/inspection/rules?dbType=${encodeURIComponent(dbType)}`) || [];
+            } catch (e) { pool = []; }
+        }
+    }
+    const avail = pool.filter(r => !bound.has(r.id));
+
+    $('bindRuleSel').innerHTML = avail.length
+        ? avail.map(r => `<option value="${r.id}">${esc(r.ruleKey)} · ${esc(r.ruleNameZh || '')}</option>`).join('')
+        : '<option value="">（同库类型下已无可绑定的规则）</option>';
+}
+
+async function bindRuleToChapter() {
+    const chapterId = state.rules.bindChapterId;
+    const v = $('bindRuleSel').value;
+    if (!chapterId || !v) { toast('没有可绑定的规则', 'bad'); return; }
+    try {
+        await api(`/api/inspection/chapters/${chapterId}/rules`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ruleId: +v })
+        });
+        toast('已绑定', 'ok');
+        await refreshBindList();
+        await fillBindRuleSelect();
+        await reloadTree();
+    } catch (e) {
+        toast('绑定失败：' + e.message, 'bad');
+    }
+}
+
+async function unbindRule(chapterId, ruleId) {
+    const r = (state.rules.bindList || []).find(x => x.id === ruleId)
+        || (state.rules.list || []).find(x => x.id === ruleId);
+    const name = r ? r.ruleKey : ruleId;
+    if (!confirm(`确定解除对该规则的引用？\n规则「${name}」本身仍保留在规则库中。`)) return;
+    try {
+        await api(`/api/inspection/chapters/${chapterId}/rules/${ruleId}`, { method: 'DELETE' });
+        toast('已解绑', 'ok');
+        if (state.rules.bindChapterId === chapterId) {
+            await refreshBindList();
+            await fillBindRuleSelect();
+        }
+        await reloadTree();
+    } catch (e) {
+        toast('解绑失败：' + e.message, 'bad');
     }
 }
 
@@ -1770,7 +2243,8 @@ async function loadHistory() {
 const HIST_TABLE_LABEL = {
     inspection_template: '模板',
     inspection_chapter: '章节',
-    inspection_query: '规则',
+    inspection_rule: '规则',
+    inspection_chapter_rule: '章节引用',
     inspection_baseline: '基线'
 };
 const HIST_ACTION_LABEL = { INSERT: '新增', UPDATE: '修改', DELETE: '删除' };

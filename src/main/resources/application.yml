@@ -40,8 +40,11 @@ dbnav:
   # Database types definition
   db-types-config: classpath:db-types.json
 
-  # 巡检模板种子（21 章框架 + 各库巡检 SQL）
+  # 巡检模板种子（报告骨架：模板 → 章节 → 引用哪些规则）
   inspection-templates: classpath:inspection/templates.json
+
+  # 巡检规则库种子（规则正文，跨模板共享）
+  inspection-rules: classpath:inspection/rules.json
 
   # 配置基线种子（内置默认阈值）
   inspection-baselines: classpath:inspection/baselines.json

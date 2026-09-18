@@ -10,11 +10,12 @@
    它做的是 jsdom 做不到的事：真实布局（getBoundingClientRect）+ 真实 CSS 级联。
 
    覆盖的缺陷类型（都属于「元素该藏起来却显示」）：
-     1. 首屏六个弹窗因 .modal-mask{display:flex} 覆盖 hidden 而全部常显并堆叠
+     1. 首屏七个弹窗因 .modal-mask{display:flex} 覆盖 hidden 而全部常显并堆叠
      2. SQL 编辑器的耗时徽标 .badge{display:inline-block} 空徽标常显
      3. 弹窗内条件字段（.field{display:flex}）不随下拉切换显隐
         - 基线弹窗：BETWEEN 区间字段
         - 数据源弹窗：Oracle 专属的 SID / Service Name
+     4. 视图互斥：切到规则引擎后，巡检配置管理 / 基线配置管理必须不可见
 
    用法：
      node scripts/ui_guard.js
@@ -222,7 +223,7 @@ async function waitReady(cdp, timeout = 20000) {
                          w: Math.round(r.width), h: Math.round(r.height) };
             });
         `);
-        check(`页面上有 ${masks.length} 个弹窗（应为 6 个）`, masks.length === 6, JSON.stringify(masks));
+        check(`页面上有 ${masks.length} 个弹窗（应为 7 个）`, masks.length === 7, JSON.stringify(masks));
         for (const m of masks) {
             check(`弹窗 #${m.id} 首屏不可见（display=${m.display}, 尺寸 ${m.w}×${m.h}）`,
                 m.display === 'none' && m.h === 0,
@@ -246,7 +247,7 @@ async function waitReady(cdp, timeout = 20000) {
 
         /* ---- 3. 基线弹窗：BETWEEN 区间字段联动（基线已是独立菜单） ---- */
         console.log();
-        console.log('── 基线规则页 + BETWEEN 区间字段联动 ──');
+        console.log('── 基线配置管理页 + BETWEEN 区间字段联动 ──');
         await evaluate(cdp, `switchView('baselines'); return true;`);
         await sleep(600);
         const baseView = await evaluate(cdp, `
@@ -257,11 +258,36 @@ async function waitReady(cdp, timeout = 20000) {
                 rows: document.querySelectorAll('#baseTableWrap tbody tr').length
             };
         `);
-        check(`切到「基线规则」后导航高亮正确（${baseView.navActive}）`, baseView.navActive === 'baselines',
+        check(`切到「基线配置管理」后导航高亮正确（${baseView.navActive}）`, baseView.navActive === 'baselines',
             JSON.stringify(baseView));
-        check(`基线规则视图可见且有统计条（${baseView.stats} 张卡）`,
+        check(`基线配置管理视图可见且有统计条（${baseView.stats} 张卡）`,
             baseView.viewVisible && baseView.stats === 4, JSON.stringify(baseView));
         check(`基线表格已渲染（${baseView.rows} 行）`, baseView.rows > 0, JSON.stringify(baseView));
+
+        /* ---- 3b. 规则引擎：独立菜单，且与其它视图互斥可见 ---- */
+        console.log();
+        console.log('── 规则引擎页 ──');
+        await evaluate(cdp, `switchView('rules'); return true;`);
+        await sleep(900);
+        const ruleView = await evaluate(cdp, `
+            return {
+                navActive: (document.querySelector('.nav-item.active') || {}).dataset?.view || null,
+                viewVisible: getComputedStyle(document.getElementById('view-rules')).display !== 'none',
+                inspHidden: getComputedStyle(document.getElementById('view-inspection')).display === 'none',
+                baseHidden: getComputedStyle(document.getElementById('view-baselines')).display === 'none',
+                stats: document.querySelectorAll('#ruleStats .stat-card').length,
+                rows: document.querySelectorAll('#ruleTableWrap tbody tr').length,
+                types: document.getElementById('ruleTypeSel').options.length
+            };
+        `);
+        check(`切到「规则引擎」后导航高亮正确（${ruleView.navActive}）`, ruleView.navActive === 'rules',
+            JSON.stringify(ruleView));
+        check(`规则引擎视图可见（统计条 ${ruleView.stats} 张卡）`,
+            ruleView.viewVisible && ruleView.stats === 3, JSON.stringify(ruleView));
+        check(`切换视图时旧视图已隐藏（巡检配置管理/基线配置管理均不可见）`,
+            ruleView.inspHidden && ruleView.baseHidden, JSON.stringify(ruleView));
+        check(`规则库表格已渲染（${ruleView.rows} 行）`, ruleView.rows > 0, JSON.stringify(ruleView));
+        check(`规则类型下拉已填充（${ruleView.types} 项）`, ruleView.types === 6, JSON.stringify(ruleView));
 
         await evaluate(cdp, `document.getElementById('btnNewBaseline').click(); return true;`);
         await sleep(300);

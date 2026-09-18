@@ -625,6 +625,17 @@ table.grid tbody tr:hover { background: #fbfcfe; }
     white-space: pre-wrap; word-break: break-word; max-height: 130px; overflow: auto;
 }
 .q-acts { margin-left: auto; display: flex; gap: 8px; }
+.q-name { font-size: 12.5px; font-weight: 570; color: var(--text); }
+
+/* ---------- 规则引擎 ---------- */
+/* input[type=text] 全局是 width:100%，放进 flex 工具栏会独占一行；
+   这里给搜索框一个固定宽度，让它和左边的下拉同排 */
+input.rule-search { width: 240px; }
+.test-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.table-scroll {
+    margin-top: 8px; border: 1px solid var(--border); border-radius: 6px;
+    overflow: auto; max-height: 320px; background: var(--surface);
+}
 
 /* ---------- 风险等级 ---------- */
 .risk { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 2px 7px; border-radius: 5px; }

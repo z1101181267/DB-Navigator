@@ -167,9 +167,117 @@ public class InspectionRunner {
     }
 
     // ==================================================================
+    // 规则试跑
+    // ==================================================================
+
+    /**
+     * 试跑规则库里的单条规则：拿真实数据源执行一次它的 SQL。
+     *
+     * 与 {@link #run} 的区别是<b>什么都不落库</b>：不产生执行记录、不计入合规率、
+     * 不影响历史。用途是改完 SQL 之后立刻确认「能不能跑通、返回什么」——
+     * 这是规则库作为一个可编辑资产该有的反馈回路。
+     *
+     * 库类型不匹配（拿 Oracle 的规则去试 MySQL 数据源）不拦截，只在结果里
+     * 标 dbTypeMismatch=true —— 试跑本来就是用来撞墙的，报错信息比拦截更有用。
+     */
+    public Map<String, Object> testRule(Long ruleId, Long dataSourceId) {
+        InspectionRule rule = configService.findRule(ruleId)
+                .orElseThrow(() -> new IllegalArgumentException("规则不存在: " + ruleId));
+        DataSourceInfo ds = dataSourceManager.findById(dataSourceId)
+                .orElseThrow(() -> new IllegalArgumentException("数据源不存在: " + dataSourceId));
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ruleId", rule.getId());
+        out.put("ruleKey", rule.getRuleKey());
+        out.put("ruleNameZh", rule.getRuleNameZh());
+        out.put("ruleSql", rule.getRuleSql());
+        out.put("ruleDbType", rule.getDbType());
+        out.put("dataSourceId", ds.getId());
+        out.put("dataSourceName", ds.getName());
+        out.put("dbType", ds.getDbType());
+        out.put("dbTypeMismatch", !String.valueOf(rule.getDbType())
+                .equalsIgnoreCase(String.valueOf(ds.getDbType())));
+
+        String sql = normalizeSql(rule.getRuleSql());
+        if (sql == null) {
+            out.put("status", "FAILED");
+            out.put("elapsedMs", 0L);
+            out.put("errorMsg", "规则未配置 SQL");
+            return out;
+        }
+
+        long t0 = System.currentTimeMillis();
+        Connection conn = null;
+        try {
+            conn = dataSourceManager.getConnection(ds.getId());
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setFetchSize(Math.min(PREVIEW_ROWS, 500));
+                boolean hasResultSet = ps.execute();
+                out.put("elapsedMs", System.currentTimeMillis() - t0);
+
+                if (!hasResultSet) {
+                    // DDL / DML：跑通即算成功，没有结果集
+                    out.put("status", "OK");
+                    out.put("hasResultSet", false);
+                    out.put("columns", List.of());
+                    out.put("rows", List.of());
+                    out.put("rowCount", 0);
+                    out.put("truncated", false);
+                    return out;
+                }
+
+                try (ResultSet rs = ps.getResultSet()) {
+                    ResultSetMetaData md = rs.getMetaData();
+                    int colCount = md.getColumnCount();
+                    List<String> columns = new ArrayList<>(colCount);
+                    for (int i = 1; i <= colCount; i++) {
+                        columns.add(md.getColumnLabel(i));
+                    }
+                    List<List<Object>> preview = new ArrayList<>();
+                    int scanned = 0;
+                    while (rs.next()) {
+                        if (scanned >= MAX_SCAN_ROWS) {
+                            break;
+                        }
+                        if (preview.size() < PREVIEW_ROWS) {
+                            List<Object> row = new ArrayList<>(colCount);
+                            for (int i = 1; i <= colCount; i++) {
+                                Object v = rs.getObject(i);
+                                row.add(v == null ? null : String.valueOf(v));
+                            }
+                            preview.add(row);
+                        }
+                        scanned++;
+                    }
+                    out.put("status", "OK");
+                    out.put("hasResultSet", true);
+                    out.put("columns", columns);
+                    out.put("rows", preview);
+                    out.put("rowCount", scanned);
+                    out.put("truncated", scanned > preview.size());
+                    return out;
+                }
+            }
+        } catch (Exception e) {
+            out.put("status", "FAILED");
+            out.put("elapsedMs", System.currentTimeMillis() - t0);
+            out.put("errorMsg", rootMessage(e));
+            return out;
+        } finally {
+            closeQuietly(conn);
+        }
+    }
+
+    // ==================================================================
     // 规则执行
     // ==================================================================
 
+    /**
+     * 按模板逐章执行规则。
+     *
+     * 规则来自规则库（章节通过绑定表引用），执行结果快照写进 InspectionRunQuery ——
+     * 快照是有意的：事后改规则库不该改写历史报告的内容。
+     */
     private void executeQueries(Connection conn, InspectionTemplate tpl, boolean onlyEnabled,
                                 Set<Integer> chapterFilter, List<InspectionRunQuery> out) {
         if (tpl.getChapters() == null) {
@@ -180,30 +288,30 @@ public class InspectionRunner {
                 continue;
             }
             boolean chapterEnabled = ch.getEnabled() == null || ch.getEnabled() == 1;
-            if (ch.getQueries() == null) {
+            if (ch.getRules() == null) {
                 continue;
             }
-            for (InspectionQuery q : ch.getQueries()) {
-                boolean queryEnabled = q.getEnabled() == null || q.getEnabled() == 1;
+            for (InspectionRule r : ch.getRules()) {
+                boolean ruleEnabled = r.getEnabled() == null || r.getEnabled() == 1;
 
                 // onlyEnabled=true 时，停用的章节/规则不执行，但仍记一条 SKIPPED，
                 // 让报告能说清「134 条规则里有 3 条是停用的」，而不是静默消失。
-                if (onlyEnabled && (!chapterEnabled || !queryEnabled)) {
-                    out.add(skipped(ch, q, !chapterEnabled ? "所属章节已停用" : "规则已停用"));
+                if (onlyEnabled && (!chapterEnabled || !ruleEnabled)) {
+                    out.add(skipped(ch, r, !chapterEnabled ? "所属章节已停用" : "规则已停用"));
                     continue;
                 }
-                out.add(executeRule(conn, ch, q));
+                out.add(executeRule(conn, ch, r));
             }
         }
     }
 
-    private InspectionRunQuery skipped(InspectionChapter ch, InspectionQuery q, String reason) {
+    private InspectionRunQuery skipped(InspectionChapter ch, InspectionRule r, String reason) {
         return InspectionRunQuery.builder()
                 .chapterNumber(ch.getChapterNumber())
                 .chapterTitle(ch.getChapterTitleZh())
-                .queryKey(q.getQueryKey())
-                .querySql(q.getQuerySql())
-                .descriptionZh(q.getQueryDescriptionZh())
+                .queryKey(r.getRuleKey())
+                .querySql(r.getRuleSql())
+                .descriptionZh(r.getRuleNameZh())
                 .status("SKIPPED")
                 .elapsedMs(0L)
                 .rowCount(0)
@@ -212,16 +320,16 @@ public class InspectionRunner {
                 .build();
     }
 
-    private InspectionRunQuery executeRule(Connection conn, InspectionChapter ch, InspectionQuery q) {
+    private InspectionRunQuery executeRule(Connection conn, InspectionChapter ch, InspectionRule r) {
         long t0 = System.currentTimeMillis();
         InspectionRunQuery.InspectionRunQueryBuilder b = InspectionRunQuery.builder()
                 .chapterNumber(ch.getChapterNumber())
                 .chapterTitle(ch.getChapterTitleZh())
-                .queryKey(q.getQueryKey())
-                .querySql(q.getQuerySql())
-                .descriptionZh(q.getQueryDescriptionZh());
+                .queryKey(r.getRuleKey())
+                .querySql(r.getRuleSql())
+                .descriptionZh(r.getRuleNameZh());
 
-        String sql = normalizeSql(q.getQuerySql());
+        String sql = normalizeSql(r.getRuleSql());
         if (sql == null) {
             return b.status("FAILED").elapsedMs(0L).rowCount(0).truncated(0)
                     .errorMsg("规则未配置 SQL").build();

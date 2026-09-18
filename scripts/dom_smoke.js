@@ -1,7 +1,9 @@
 /* ============================================================
    DOM 冒烟测试 —— 在 jsdom 里真实执行前端 app.js
-   校验：boot 流程、视图切换、驱动管理两栏布局、巡检配置页签、模板树、
-        基线规则（独立菜单）、巡检执行（发起 → 报告渲染）、
+   校验：boot 流程、视图切换、驱动管理两栏布局、
+        巡检配置管理（页签 / 模板树 / 章节引用规则）、
+        基线配置管理（独立菜单）、规则引擎（规则库 / 试跑入口）、
+        巡检执行（发起 → 报告渲染）、
         巡检历史（列表 / 筛选 / 在线预览 / 三格式下载入口）
    用法：
      NODE_PATH=<node workspace>/node_modules node scripts/dom_smoke.js
@@ -80,9 +82,9 @@ function tplItemOf(doc, label) {
     check('侧边栏数据库 chips 已渲染', $('dbChips').children.length >= 5, $('dbChips').children.length);
     check('数据源表格已渲染', $('dsTable').querySelector('tbody').innerHTML.length >= 0);
 
-    console.log('\n\u2500\u2500 切换到「巡检配置」视图 \u2500\u2500');
+    console.log('\n\u2500\u2500 切换到「巡检配置管理」视图 \u2500\u2500');
     const navInsp = doc.querySelector('.nav-item[data-view="inspection"]');
-    check('导航存在「巡检配置」入口', !!navInsp);
+    check('导航存在「巡检配置管理」入口', !!navInsp);
     navInsp.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
     const statsOk = await until(() => $('inspStats').querySelector('.stat-num'), 'stats');
@@ -90,10 +92,10 @@ function tplItemOf(doc, label) {
 
     if (statsOk) {
         const nums = [...$('inspStats').querySelectorAll('.stat-num')].map(e => e.textContent.trim());
-        check('统计条含模板/章节/规则/基线四个数字', nums.length === 4, JSON.stringify(nums));
+        check('统计条含模板/章节/规则库/基线四个数字', nums.length === 4, JSON.stringify(nums));
         check('模板数 = 6', nums[0] === '6', nums[0]);
         check('章节数 = 113', nums[1] === '113', nums[1]);
-        check('规则数 = 160', nums[2] === '160', nums[2]);
+        check('规则库 = 160', nums[2] === '160', nums[2]);
         check('基线数 = 88', nums[3] === '88', nums[3]);
     }
 
@@ -109,7 +111,7 @@ function tplItemOf(doc, label) {
     check('章节默认折叠（chap-body 未展开）',
         $('tplDetail').querySelectorAll('.chap.open').length === 0);
 
-    console.log('\n\u2500\u2500 展开章节 → 规则可见 \u2500\u2500');
+    console.log('\n\u2500\u2500 展开章节 → 规则引用可见 \u2500\u2500');
     const firstChapHead = $('tplDetail').querySelector('[data-chap-toggle]');
     firstChapHead.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await sleep(120);
@@ -117,6 +119,9 @@ function tplItemOf(doc, label) {
         $('tplDetail').querySelectorAll('.chap.open').length);
     check('展开后规则行可见', $('tplDetail').querySelectorAll('.q-row').length > 0,
         $('tplDetail').querySelectorAll('.q-row').length);
+    check('章节里提供「引用规则」入口（不再内嵌新建规则）',
+        $('tplDetail').querySelectorAll('[data-bind-rule]').length > 0,
+        $('tplDetail').querySelectorAll('[data-bind-rule]').length);
 
     console.log('\n\u2500\u2500 切换模板（MySQL 分组 → 21 章） \u2500\u2500');
     const mysqlItem = tplItemOf(doc, 'MySQL');
@@ -130,23 +135,43 @@ function tplItemOf(doc, label) {
             $('tplList').querySelectorAll('.tpl-item.active').length);
     }
 
-    console.log('\n\u2500\u2500 基线规则（独立顶级菜单） \u2500\u2500');
+    console.log('\n\u2500\u2500 基线配置管理（独立顶级菜单） \u2500\u2500');
     const navBase = doc.querySelector('.nav-item[data-view="baselines"]');
-    check('导航存在「基线规则」入口', !!navBase);
+    check('导航存在「基线配置管理」入口', !!navBase);
     navBase.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     const baseOk = await until(() => $('baseTableWrap').querySelectorAll('tbody tr').length > 0, 'baselines');
     check('基线表格已渲染', baseOk, $('baseTableWrap').querySelectorAll('tbody tr').length);
     check('基线类型下拉已填充', $('baseTypeSel').options.length === 6, $('baseTypeSel').options.length);
     check('基线行含实测值输入框', $('baseTableWrap').querySelectorAll('[data-val]').length > 0,
         $('baseTableWrap').querySelectorAll('[data-val]').length);
-    check('基线规则页有统计条', $('baseStats').querySelectorAll('.stat-card').length === 4,
+    check('基线配置管理页有统计条', $('baseStats').querySelectorAll('.stat-card').length === 4,
         $('baseStats').querySelectorAll('.stat-card').length);
-    check('基线规则已从巡检配置页签中移除',
+    check('基线已从巡检配置页签中移除',
         !doc.querySelector('#view-inspection .tab[data-tab="base"]')
         && !doc.getElementById('pane-base'));
-    check('巡检配置只剩两个页签',
+    check('巡检配置管理只剩两个页签',
         doc.querySelectorAll('#view-inspection .tab').length === 2,
         doc.querySelectorAll('#view-inspection .tab').length);
+
+    console.log('\n\u2500\u2500 规则引擎（独立顶级菜单） \u2500\u2500');
+    const navRules = doc.querySelector('.nav-item[data-view="rules"]');
+    check('导航存在「规则引擎」入口', !!navRules);
+    navRules.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+
+    const ruleOk = await until(() => $('ruleTableWrap').querySelectorAll('tbody tr').length > 0, 'rules');
+    check('规则库表格已渲染', ruleOk, $('ruleTableWrap').querySelectorAll('tbody tr').length);
+    check('规则类型下拉已填充', $('ruleTypeSel').options.length === 6, $('ruleTypeSel').options.length);
+    check('规则库统计条 3 张卡', $('ruleStats').querySelectorAll('.stat-card').length === 3,
+        $('ruleStats').querySelectorAll('.stat-card').length);
+    check('规则表列出「被谁引用」',
+        $('ruleTableWrap').innerHTML.includes('\u88ab\u8c01\u5f15\u7528'));
+    check('规则表有启停操作', $('ruleTableWrap').querySelectorAll('[data-toggle-rule]').length > 0,
+        $('ruleTableWrap').querySelectorAll('[data-toggle-rule]').length);
+    check('规则表有试跑操作', $('ruleTableWrap').querySelectorAll('[data-test-rule]').length > 0,
+        $('ruleTableWrap').querySelectorAll('[data-test-rule]').length);
+    check('试跑规则下拉已填充', $('ruleTestSel').options.length > 1, $('ruleTestSel').options.length);
+    check('试跑数据源下拉已填充', $('ruleTestDs').options.length > 1, $('ruleTestDs').options.length);
+    check('规则库不占用巡检配置管理的页签', !doc.getElementById('pane-rules'));
 
     console.log('\n\u2500\u2500 填入示例值 → 运行校验 \u2500\u2500');
     $('btnFillDemo').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));

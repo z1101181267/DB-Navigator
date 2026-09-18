@@ -26,6 +26,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 JAVA = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8080").rstrip("/")
 PYV = (sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:9090").rstrip("/")
@@ -53,6 +54,19 @@ CASES = [
     ("模板树 kingbase",      "/api/inspection/templates/default/kingbase/tree"),
     ("模板树 h2(自检)",       "/api/inspection/templates/default/h2/tree"),
     ("模板树(仅启用)",         "/api/inspection/templates/default/mysql/tree?onlyEnabled=true"),
+    # 规则库（规则引擎）：同一批种子，两侧的规则条数与内容必须逐字段一致。
+    # /rules/{id} 依赖「两侧按同一顺序导入同一份 rules.json」，id 因此可对齐；
+    # 这条正是用来盯住这个前提的 —— 一旦某侧导入顺序变了，它会立刻红。
+    ("规则库 oracle",         "/api/inspection/rules?dbType=oracle"),
+    ("规则库 mysql",          "/api/inspection/rules?dbType=mysql"),
+    ("规则库 h2(自检)",       "/api/inspection/rules?dbType=h2"),
+    ("规则库(仅启用)",         "/api/inspection/rules?dbType=oracle&enabled=true"),
+    ("规则库(按归类章节)",      f"/api/inspection/rules?dbType=oracle&category={quote('健康状态概览')}"),
+    ("规则库(关键词)",         "/api/inspection/rules?keyword=version"),
+    ("规则库统计",            "/api/inspection/rules/stats"),
+    ("规则库归类章节",         "/api/inspection/rules/categories?dbType=oracle"),
+    ("单条规则",              "/api/inspection/rules/80"),
+    ("章节引用规则",           "/api/inspection/chapters/1/rules"),
     ("基线 oracle",          "/api/inspection/baselines?dbType=oracle"),
     ("基线 mysql",           "/api/inspection/baselines?dbType=mysql"),
     ("基线 postgresql",      "/api/inspection/baselines?dbType=postgresql"),
@@ -82,6 +96,16 @@ ERROR_CASES = [
     ("400 数据源不存在",      "POST", "/api/inspection/run", {"dataSourceId": 999999}),
     ("404 删不存在的记录",     "DELETE", "/api/inspection/runs/999999"),
     ("404 导出记录不存在",     "GET", "/api/inspection/runs/999999/export?format=pdf"),
+    # 规则库：被寻址的资源不存在 → 404；请求体里引用了不存在的 id 仍算参数问题 → 400。
+    # 这条边界两侧必须一致，否则调用方没法写出一致的判断。
+    ("404 规则不存在",        "GET", "/api/inspection/rules/999999"),
+    ("404 改规则不存在",      "PUT", "/api/inspection/rules/999999", {"ruleSql": "SELECT 1"}),
+    ("404 删规则不存在",      "DELETE", "/api/inspection/rules/999999"),
+    ("404 启停规则不存在",     "POST", "/api/inspection/rules/999999/enabled?enabled=true"),
+    ("400 新建规则缺必填",     "POST", "/api/inspection/rules", {"dbType": "mysql"}),
+    ("400 试跑缺 dataSourceId", "POST", "/api/inspection/rules/80/test", {}),
+    ("400 绑定不存在的规则",    "POST", "/api/inspection/chapters/1/rules", {"ruleId": 999999}),
+    ("400 解绑未引用的规则",    "DELETE", "/api/inspection/chapters/1/rules/999999"),
 ]
 
 

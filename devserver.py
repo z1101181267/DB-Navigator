@@ -901,9 +901,9 @@ def main():
           ", ".join(t["label"] for t in DB_TYPES))
     print(f"  驱动登记   : 种子导入 {n_seed} 条，目录扫描新增 {n_scan} 条，"
           f"合计 {len(driver_rows())} 条")
-    print(f"  巡检配置   : 模板 {insp['templatesLoaded']} 个 / 章节 "
-          f"{insp['chaptersLoaded']} 章 / 规则 {insp['queriesLoaded']} 条 / 基线 "
-          f"{insp['baselinesLoaded']} 条")
+    print(f"  巡检配置   : 模板 {insp['templatesTotal']} 个 / 章节 "
+          f"{insp['chaptersTotal']} 章 / 规则库 {insp['rulesTotal']} 条 / "
+          f"章节引用 {insp['bindingsTotal']} 条 / 基线 {insp['baselinesTotal']} 条")
     print(f"  驱动目录   : {DRIVERS_DIR}")
     print(f"  元数据     : {DB_PATH}")
     print("-" * 62)

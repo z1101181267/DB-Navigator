@@ -1,5 +1,5 @@
 {
-  "_comment": "巡检模板种子。章节目录框架为 21 章结构（MySQL/PG/Oracle 各自独立）；每条 query 含 key / sql / 中英描述。所有 SQL 均针对对应数据库语法编写。",
+  "_comment": "巡检模板：只描述报告骨架（模板 → 章节）与章节引用了哪些规则。规则正文在 rules.json，此处只放 rule_keys 引用，避免同一段 SQL 在多个模板里各存一份。",
   "templates": [
     {
       "db_type": "oracle",
@@ -10,96 +10,201 @@
       "is_preset": 1,
       "description": "适用于 Oracle 12c/19c/21c，覆盖实例、内存、表空间、归档、会话、锁、安全等 21 个维度",
       "chapters": [
-        { "chapter_number": 1, "chapter_title_zh": "健康状态概览", "chapter_title_en": "Health Overview", "description": "数据库整体健康状态概览",
-          "queries": [
-            { "key": "oracle_version", "sql": "SELECT banner FROM v$version WHERE ROWNUM = 1", "desc_zh": "获取 Oracle 版本", "desc_en": "Get Oracle version" },
-            { "key": "oracle_instance_status", "sql": "SELECT instance_name, host_name, version, status, database_status, startup_time FROM v$instance", "desc_zh": "实例状态与启动时间", "desc_en": "Instance status and startup time" }
-          ] },
-        { "chapter_number": 2, "chapter_title_zh": "数据库基本信息", "chapter_title_en": "Database Basic Info", "description": "数据库标识与归档配置",
-          "queries": [
-            { "key": "oracle_database_info", "sql": "SELECT name, dbid, log_mode, force_logging, database_role, open_mode, created FROM v$database", "desc_zh": "数据库基本信息与归档模式", "desc_en": "Database info and archive mode" }
-          ] },
-        { "chapter_number": 3, "chapter_title_zh": "实例与进程", "chapter_title_en": "Instance & Processes", "description": "进程与会话资源上限",
-          "queries": [
-            { "key": "oracle_processes", "sql": "SELECT name, value FROM v$parameter WHERE name IN ('processes','sessions','open_cursors')", "desc_zh": "进程/会话/游标上限", "desc_en": "Process/session/cursor limits" }
-          ] },
-        { "chapter_number": 4, "chapter_title_zh": "SGA / PGA 内存", "chapter_title_en": "SGA / PGA Memory", "description": "内存组件使用情况",
-          "queries": [
-            { "key": "oracle_sga_info", "sql": "SELECT name, ROUND(bytes/1024/1024, 2) AS size_mb FROM v$sgainfo WHERE name IN ('Buffer Cache Size','Shared Pool Size','Large Pool Size','Java Pool Size','Fixed SGA Size')", "desc_zh": "SGA 各组件大小", "desc_en": "SGA component sizes" },
-            { "key": "oracle_pga_target", "sql": "SELECT name, value FROM v$parameter WHERE name = 'pga_aggregate_target'", "desc_zh": "PGA 聚合目标", "desc_en": "PGA aggregate target" }
-          ] },
-        { "chapter_number": 5, "chapter_title_zh": "关键参数", "chapter_title_en": "Key Parameters", "description": "核心初始化参数检查",
-          "queries": [
-            { "key": "oracle_key_params", "sql": "SELECT name, value FROM v$parameter WHERE name IN ('sga_target','sga_max_size','db_block_size','undo_retention','cursor_sharing','optimizer_mode') ORDER BY name", "desc_zh": "关键初始化参数", "desc_en": "Key initialization parameters" }
-          ] },
-        { "chapter_number": 6, "chapter_title_zh": "表空间使用", "chapter_title_en": "Tablespace Usage", "description": "表空间容量与使用率",
-          "queries": [
-            { "key": "oracle_tablespace_usage", "sql": "SELECT d.tablespace_name, ROUND(SUM(d.bytes)/1024/1024, 2) AS total_mb, ROUND(SUM(NVL(f.bytes,0))/1024/1024, 2) AS free_mb, ROUND((SUM(d.bytes)-SUM(NVL(f.bytes,0)))*100/SUM(d.bytes), 2) AS used_pct FROM dba_data_files d LEFT JOIN (SELECT tablespace_name, SUM(bytes) bytes FROM dba_free_space GROUP BY tablespace_name) f ON d.tablespace_name = f.tablespace_name GROUP BY d.tablespace_name ORDER BY used_pct DESC", "desc_zh": "表空间使用率", "desc_en": "Tablespace usage ratio" }
-          ] },
-        { "chapter_number": 7, "chapter_title_zh": "UNDO 表空间", "chapter_title_en": "UNDO Tablespace", "description": "UNDO 空间与状态",
-          "queries": [
-            { "key": "oracle_undo_extents", "sql": "SELECT tablespace_name, status, ROUND(SUM(bytes)/1024/1024, 2) AS size_mb, COUNT(*) AS extents FROM dba_undo_extents GROUP BY tablespace_name, status ORDER BY tablespace_name, status", "desc_zh": "UNDO 区段分布", "desc_en": "UNDO extent distribution" }
-          ] },
-        { "chapter_number": 8, "chapter_title_zh": "Redo 日志", "chapter_title_en": "Redo Logs", "description": "联机重做日志组与成员",
-          "queries": [
-            { "key": "oracle_redo_logs", "sql": "SELECT l.group#, l.thread#, l.bytes/1024/1024 AS size_mb, l.members, l.status, l.archived FROM v$log l ORDER BY l.group#", "desc_zh": "重做日志组状态", "desc_en": "Redo log group status" }
-          ] },
-        { "chapter_number": 9, "chapter_title_zh": "归档与备份", "chapter_title_en": "Archive & Backup", "description": "归档模式与最近备份",
-          "queries": [
-            { "key": "oracle_archive_dest", "sql": "SELECT dest_id, status, destination, error FROM v$archive_dest WHERE status <> 'INACTIVE'", "desc_zh": "归档目标状态", "desc_en": "Archive destination status" },
-            { "key": "oracle_backup_recent", "sql": "SELECT session_key, input_type, status, start_time, elapsed_seconds FROM v$rman_backup_job_details WHERE start_time > SYSDATE - 7 ORDER BY start_time DESC", "desc_zh": "近 7 天 RMAN 备份", "desc_en": "RMAN backups in last 7 days" }
-          ] },
-        { "chapter_number": 10, "chapter_title_zh": "会话与连接", "chapter_title_en": "Sessions & Connections", "description": "会话分布与活跃度",
-          "queries": [
-            { "key": "oracle_session_summary", "sql": "SELECT status, type, COUNT(*) AS cnt FROM v$session GROUP BY status, type ORDER BY cnt DESC", "desc_zh": "会话状态分布", "desc_en": "Session status distribution" },
-            { "key": "oracle_active_sessions", "sql": "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'ACTIVE' THEN 1 ELSE 0 END) AS active FROM v$session WHERE type = 'USER'", "desc_zh": "用户会话总数与活跃数", "desc_en": "User session total and active" }
-          ] },
-        { "chapter_number": 11, "chapter_title_zh": "等待事件与性能", "chapter_title_en": "Wait Events", "description": "系统级等待事件",
-          "queries": [
-            { "key": "oracle_wait_events", "sql": "SELECT event, total_waits, time_waited_micro/1000000 AS time_waited_sec, average_wait FROM v$system_event WHERE wait_class <> 'Idle' ORDER BY time_waited_micro DESC FETCH FIRST 20 ROWS ONLY", "desc_zh": "TOP 20 系统等待事件", "desc_en": "Top 20 system wait events" }
-          ] },
-        { "chapter_number": 12, "chapter_title_zh": "TOP SQL", "chapter_title_en": "Top SQL", "description": "按资源消耗排序的 SQL",
-          "queries": [
-            { "key": "oracle_top_sql_elapsed", "sql": "SELECT * FROM (SELECT sql_id, executions, ROUND(elapsed_time/1000000, 2) AS elapsed_sec, buffer_gets, disk_reads, ROUND(elapsed_time/GREATEST(executions,1)/1000, 2) AS avg_ms FROM v$sql ORDER BY elapsed_time DESC) WHERE ROWNUM <= 20", "desc_zh": "TOP 20 按耗时排序 SQL", "desc_en": "Top 20 SQL by elapsed time" }
-          ] },
-        { "chapter_number": 13, "chapter_title_zh": "锁与阻塞", "chapter_title_en": "Locks & Blocking", "description": "阻塞链与锁等待",
-          "queries": [
-            { "key": "oracle_blocking_sessions", "sql": "SELECT blocking_session, sid, serial#, event, seconds_in_wait, row_wait_obj# FROM v$session WHERE blocking_session IS NOT NULL ORDER BY seconds_in_wait DESC", "desc_zh": "当前阻塞会话", "desc_en": "Currently blocked sessions" }
-          ] },
-        { "chapter_number": 14, "chapter_title_zh": "数据文件与存储", "chapter_title_en": "Datafiles & Storage", "description": "数据文件与自动扩展",
-          "queries": [
-            { "key": "oracle_datafiles", "sql": "SELECT tablespace_name, file_name, ROUND(bytes/1024/1024, 2) AS size_mb, autoextensible, ROUND(maxbytes/1024/1024, 2) AS max_mb, status FROM dba_data_files ORDER BY tablespace_name", "desc_zh": "数据文件清单与自动扩展", "desc_en": "Datafile list and autoextend" }
-          ] },
-        { "chapter_number": 15, "chapter_title_zh": "RAC 状态", "chapter_title_en": "RAC Status", "description": "集群实例与节点状态（非 RAC 可跳过）",
-          "queries": [
-            { "key": "oracle_rac_instances", "sql": "SELECT inst_id, instance_name, host_name, status, startup_time FROM gv$instance ORDER BY inst_id", "desc_zh": "集群各实例状态", "desc_en": "RAC instance status" }
-          ] },
-        { "chapter_number": 16, "chapter_title_zh": "Data Guard 状态", "chapter_title_en": "Data Guard Status", "description": "备库同步与延迟",
-          "queries": [
-            { "key": "oracle_dg_status", "sql": "SELECT database_role, protection_mode, protection_level, switchover_status FROM v$database", "desc_zh": "保护模式与角色", "desc_en": "Protection mode and role" },
-            { "key": "oracle_dg_lag", "sql": "SELECT name, value, unit, time_computed FROM v$dataguard_stats WHERE name IN ('transport lag','apply lag')", "desc_zh": "传输/应用延迟", "desc_en": "Transport/apply lag" }
-          ] },
-        { "chapter_number": 17, "chapter_title_zh": "ASM 磁盘组", "chapter_title_en": "ASM Disk Groups", "description": "ASM 磁盘组容量（非 ASM 可跳过）",
-          "queries": [
-            { "key": "oracle_asm_diskgroup", "sql": "SELECT name, state, type, ROUND(total_mb, 2) AS total_mb, ROUND(free_mb, 2) AS free_mb, ROUND((total_mb-free_mb)*100/total_mb, 2) AS used_pct FROM v$asm_diskgroup ORDER BY name", "desc_zh": "ASM 磁盘组使用率", "desc_en": "ASM diskgroup usage" }
-          ] },
-        { "chapter_number": 18, "chapter_title_zh": "安全与审计", "chapter_title_en": "Security & Audit", "description": "用户权限与审计配置",
-          "queries": [
-            { "key": "oracle_privileged_users", "sql": "SELECT grantee, granted_role, admin_option FROM dba_role_privs WHERE granted_role IN ('DBA','SYSDBA','SYSOPER') ORDER BY granted_role, grantee", "desc_zh": "高权限用户清单", "desc_en": "Privileged user list" },
-            { "key": "oracle_audit_config", "sql": "SELECT name, value FROM v$parameter WHERE name IN ('audit_trail','audit_sys_operations')", "desc_zh": "审计参数配置", "desc_en": "Audit parameter config" }
-          ] },
-        { "chapter_number": 19, "chapter_title_zh": "对象与碎片", "chapter_title_en": "Objects & Fragmentation", "description": "无效对象与空间碎片",
-          "queries": [
-            { "key": "oracle_invalid_objects", "sql": "SELECT owner, object_type, COUNT(*) AS cnt FROM dba_objects WHERE status = 'INVALID' GROUP BY owner, object_type ORDER BY cnt DESC", "desc_zh": "无效对象统计", "desc_en": "Invalid object statistics" }
-          ] },
-        { "chapter_number": 20, "chapter_title_zh": "作业与调度", "chapter_title_en": "Jobs & Scheduler", "description": "定时作业执行状态",
-          "queries": [
-            { "key": "oracle_scheduler_jobs", "sql": "SELECT owner, job_name, enabled, state, last_start_date, next_run_date FROM dba_scheduler_jobs ORDER BY owner, job_name", "desc_zh": "调度作业清单", "desc_en": "Scheduler job list" }
-          ] },
-        { "chapter_number": 21, "chapter_title_zh": "风险与建议", "chapter_title_en": "Risks & Recommendations", "description": "汇总风险项并给出修复建议", "queries": [] }
+        {
+          "chapter_number": 1,
+          "chapter_title_zh": "健康状态概览",
+          "chapter_title_en": "Health Overview",
+          "description": "数据库整体健康状态概览",
+          "rule_keys": [
+            "oracle_version",
+            "oracle_instance_status"
+          ]
+        },
+        {
+          "chapter_number": 2,
+          "chapter_title_zh": "数据库基本信息",
+          "chapter_title_en": "Database Basic Info",
+          "description": "数据库标识与归档配置",
+          "rule_keys": [
+            "oracle_database_info"
+          ]
+        },
+        {
+          "chapter_number": 3,
+          "chapter_title_zh": "实例与进程",
+          "chapter_title_en": "Instance & Processes",
+          "description": "进程与会话资源上限",
+          "rule_keys": [
+            "oracle_processes"
+          ]
+        },
+        {
+          "chapter_number": 4,
+          "chapter_title_zh": "SGA / PGA 内存",
+          "chapter_title_en": "SGA / PGA Memory",
+          "description": "内存组件使用情况",
+          "rule_keys": [
+            "oracle_sga_info",
+            "oracle_pga_target"
+          ]
+        },
+        {
+          "chapter_number": 5,
+          "chapter_title_zh": "关键参数",
+          "chapter_title_en": "Key Parameters",
+          "description": "核心初始化参数检查",
+          "rule_keys": [
+            "oracle_key_params"
+          ]
+        },
+        {
+          "chapter_number": 6,
+          "chapter_title_zh": "表空间使用",
+          "chapter_title_en": "Tablespace Usage",
+          "description": "表空间容量与使用率",
+          "rule_keys": [
+            "oracle_tablespace_usage"
+          ]
+        },
+        {
+          "chapter_number": 7,
+          "chapter_title_zh": "UNDO 表空间",
+          "chapter_title_en": "UNDO Tablespace",
+          "description": "UNDO 空间与状态",
+          "rule_keys": [
+            "oracle_undo_extents"
+          ]
+        },
+        {
+          "chapter_number": 8,
+          "chapter_title_zh": "Redo 日志",
+          "chapter_title_en": "Redo Logs",
+          "description": "联机重做日志组与成员",
+          "rule_keys": [
+            "oracle_redo_logs"
+          ]
+        },
+        {
+          "chapter_number": 9,
+          "chapter_title_zh": "归档与备份",
+          "chapter_title_en": "Archive & Backup",
+          "description": "归档模式与最近备份",
+          "rule_keys": [
+            "oracle_archive_dest",
+            "oracle_backup_recent"
+          ]
+        },
+        {
+          "chapter_number": 10,
+          "chapter_title_zh": "会话与连接",
+          "chapter_title_en": "Sessions & Connections",
+          "description": "会话分布与活跃度",
+          "rule_keys": [
+            "oracle_session_summary",
+            "oracle_active_sessions"
+          ]
+        },
+        {
+          "chapter_number": 11,
+          "chapter_title_zh": "等待事件与性能",
+          "chapter_title_en": "Wait Events",
+          "description": "系统级等待事件",
+          "rule_keys": [
+            "oracle_wait_events"
+          ]
+        },
+        {
+          "chapter_number": 12,
+          "chapter_title_zh": "TOP SQL",
+          "chapter_title_en": "Top SQL",
+          "description": "按资源消耗排序的 SQL",
+          "rule_keys": [
+            "oracle_top_sql_elapsed"
+          ]
+        },
+        {
+          "chapter_number": 13,
+          "chapter_title_zh": "锁与阻塞",
+          "chapter_title_en": "Locks & Blocking",
+          "description": "阻塞链与锁等待",
+          "rule_keys": [
+            "oracle_blocking_sessions"
+          ]
+        },
+        {
+          "chapter_number": 14,
+          "chapter_title_zh": "数据文件与存储",
+          "chapter_title_en": "Datafiles & Storage",
+          "description": "数据文件与自动扩展",
+          "rule_keys": [
+            "oracle_datafiles"
+          ]
+        },
+        {
+          "chapter_number": 15,
+          "chapter_title_zh": "RAC 状态",
+          "chapter_title_en": "RAC Status",
+          "description": "集群实例与节点状态（非 RAC 可跳过）",
+          "rule_keys": [
+            "oracle_rac_instances"
+          ]
+        },
+        {
+          "chapter_number": 16,
+          "chapter_title_zh": "Data Guard 状态",
+          "chapter_title_en": "Data Guard Status",
+          "description": "备库同步与延迟",
+          "rule_keys": [
+            "oracle_dg_status",
+            "oracle_dg_lag"
+          ]
+        },
+        {
+          "chapter_number": 17,
+          "chapter_title_zh": "ASM 磁盘组",
+          "chapter_title_en": "ASM Disk Groups",
+          "description": "ASM 磁盘组容量（非 ASM 可跳过）",
+          "rule_keys": [
+            "oracle_asm_diskgroup"
+          ]
+        },
+        {
+          "chapter_number": 18,
+          "chapter_title_zh": "安全与审计",
+          "chapter_title_en": "Security & Audit",
+          "description": "用户权限与审计配置",
+          "rule_keys": [
+            "oracle_privileged_users",
+            "oracle_audit_config"
+          ]
+        },
+        {
+          "chapter_number": 19,
+          "chapter_title_zh": "对象与碎片",
+          "chapter_title_en": "Objects & Fragmentation",
+          "description": "无效对象与空间碎片",
+          "rule_keys": [
+            "oracle_invalid_objects"
+          ]
+        },
+        {
+          "chapter_number": 20,
+          "chapter_title_zh": "作业与调度",
+          "chapter_title_en": "Jobs & Scheduler",
+          "description": "定时作业执行状态",
+          "rule_keys": [
+            "oracle_scheduler_jobs"
+          ]
+        },
+        {
+          "chapter_number": 21,
+          "chapter_title_zh": "风险与建议",
+          "chapter_title_en": "Risks & Recommendations",
+          "description": "汇总风险项并给出修复建议",
+          "rule_keys": []
+        }
       ]
     },
-
     {
       "db_type": "mysql",
       "template_name_zh": "MySQL 默认巡检模板",
@@ -109,102 +214,206 @@
       "is_preset": 1,
       "description": "适用于 MySQL 5.6/5.7/8.0+，覆盖连接、配置、InnoDB、复制、慢查询、安全等 21 个维度",
       "chapters": [
-        { "chapter_number": 1, "chapter_title_zh": "健康状态概览", "chapter_title_en": "Health Overview", "description": "数据库整体健康状态概览",
-          "queries": [
-            { "key": "mysql_version", "sql": "SELECT VERSION() AS version", "desc_zh": "获取 MySQL 版本", "desc_en": "Get MySQL version" },
-            { "key": "mysql_uptime", "sql": "SHOW GLOBAL STATUS LIKE 'Uptime'", "desc_zh": "运行时长（秒）", "desc_en": "Uptime in seconds" }
-          ] },
-        { "chapter_number": 2, "chapter_title_zh": "连接状态检查", "chapter_title_en": "Connection Status", "description": "连接数与异常连接",
-          "queries": [
-            { "key": "mysql_connection_stats", "sql": "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Threads_running','Max_used_connections','Aborted_connects','Connection_errors_max_connections')", "desc_zh": "连接相关状态变量", "desc_en": "Connection status variables" },
-            { "key": "mysql_max_connections", "sql": "SHOW VARIABLES LIKE 'max_connections'", "desc_zh": "最大连接数配置", "desc_en": "Max connections config" }
-          ] },
-        { "chapter_number": 3, "chapter_title_zh": "配置参数检查", "chapter_title_en": "Configuration Check", "description": "关键参数与基线比对",
-          "queries": [
-            { "key": "mysql_key_variables", "sql": "SHOW VARIABLES WHERE Variable_name IN ('innodb_buffer_pool_size','innodb_log_file_size','sync_binlog','innodb_flush_log_at_trx_commit','max_allowed_packet','character_set_server','collation_server')", "desc_zh": "关键配置参数", "desc_en": "Key configuration parameters" }
-          ] },
-        { "chapter_number": 4, "chapter_title_zh": "性能分析", "chapter_title_en": "Performance Analysis", "description": "QPS/TPS 与缓冲池命中率",
-          "queries": [
-            { "key": "mysql_qps_tps", "sql": "SHOW GLOBAL STATUS WHERE Variable_name IN ('Queries','Com_commit','Com_rollback','Questions')", "desc_zh": "查询与事务计数", "desc_en": "Query and transaction counters" },
-            { "key": "mysql_innodb_hit_rate", "sql": "SHOW GLOBAL STATUS WHERE Variable_name IN ('Innodb_buffer_pool_read_requests','Innodb_buffer_pool_reads')", "desc_zh": "InnoDB 缓冲池读命中", "desc_en": "InnoDB buffer pool read hit" }
-          ] },
-        { "chapter_number": 5, "chapter_title_zh": "数据库空间使用", "chapter_title_en": "Database Space Usage", "description": "各库容量与占比",
-          "queries": [
-            { "key": "mysql_db_size", "sql": "SELECT table_schema AS db_name, ROUND(SUM(data_length+index_length)/1024/1024, 2) AS size_mb, ROUND(SUM(data_length)/1024/1024, 2) AS data_mb, ROUND(SUM(index_length)/1024/1024, 2) AS index_mb, COUNT(*) AS tables FROM information_schema.tables GROUP BY table_schema ORDER BY size_mb DESC", "desc_zh": "各库容量统计", "desc_en": "Per-database size statistics" }
-          ] },
-        { "chapter_number": 6, "chapter_title_zh": "安全信息", "chapter_title_en": "Security Information", "description": "账号与权限审计",
-          "queries": [
-            { "key": "mysql_users", "sql": "SELECT user, host, account_locked, password_expired FROM mysql.user ORDER BY user, host", "desc_zh": "数据库账号清单", "desc_en": "Database account list" },
-            { "key": "mysql_empty_password", "sql": "SELECT user, host FROM mysql.user WHERE authentication_string = '' OR authentication_string IS NULL", "desc_zh": "空密码账号（高危）", "desc_en": "Accounts with empty password" }
-          ] },
-        { "chapter_number": 7, "chapter_title_zh": "复制状态检查", "chapter_title_en": "Replication Status", "description": "主从复制运行状态",
-          "queries": [
-            { "key": "mysql_slave_status", "sql": "SHOW REPLICA STATUS", "desc_zh": "副本状态（8.0.22+ 语法）", "desc_en": "Replica status" }
-          ] },
-        { "chapter_number": 8, "chapter_title_zh": "InnoDB 锁等待检查", "chapter_title_en": "InnoDB Lock Analysis", "description": "锁等待与死锁",
-          "queries": [
-            { "key": "mysql_lock_waits", "sql": "SELECT * FROM performance_schema.data_lock_waits", "desc_zh": "当前锁等待关系", "desc_en": "Current lock waits" },
-            { "key": "mysql_long_trx", "sql": "SELECT trx_id, trx_state, trx_started, TIMESTAMPDIFF(SECOND, trx_started, NOW()) AS seconds, trx_mysql_thread_id, trx_rows_locked FROM information_schema.innodb_trx ORDER BY trx_started", "desc_zh": "长事务清单", "desc_en": "Long-running transactions" }
-          ] },
-        { "chapter_number": 9, "chapter_title_zh": "缓冲池状态", "chapter_title_en": "Buffer Pool Status", "description": "InnoDB 缓冲池明细",
-          "queries": [
-            { "key": "mysql_buffer_pool_status", "sql": "SHOW GLOBAL STATUS WHERE Variable_name IN ('Innodb_buffer_pool_pages_total','Innodb_buffer_pool_pages_free','Innodb_buffer_pool_pages_dirty','Innodb_buffer_pool_wait_free')", "desc_zh": "缓冲池页统计", "desc_en": "Buffer pool page statistics" }
-          ] },
-        { "chapter_number": 10, "chapter_title_zh": "事务和锁分析", "chapter_title_en": "Transaction & Lock Analysis", "description": "当前活动事务",
-          "queries": [
-            { "key": "mysql_processlist", "sql": "SELECT id, user, host, db, command, time, state, LEFT(info, 120) AS info FROM information_schema.processlist WHERE command <> 'Sleep' ORDER BY time DESC LIMIT 30", "desc_zh": "非空闲连接与当前语句", "desc_en": "Non-idle connections and current statements" }
-          ] },
-        { "chapter_number": 11, "chapter_title_zh": "慢查询分析", "chapter_title_en": "Slow Query Analysis", "description": "按耗时聚合的慢 SQL",
-          "queries": [
-            { "key": "mysql_slow_digest", "sql": "SELECT schema_name, digest_text, count_star, ROUND(sum_timer_wait/1000000000000, 2) AS total_sec, ROUND(avg_timer_wait/1000000000, 2) AS avg_ms, sum_rows_examined, sum_rows_sent FROM performance_schema.events_statements_summary_by_digest ORDER BY sum_timer_wait DESC LIMIT 20", "desc_zh": "TOP 20 慢 SQL 摘要", "desc_en": "Top 20 slow SQL digests" }
-          ] },
-        { "chapter_number": 12, "chapter_title_zh": "表碎片和统计信息", "chapter_title_en": "Table Fragmentation & Statistics", "description": "碎片与统计信息新鲜度",
-          "queries": [
-            { "key": "mysql_table_fragmentation", "sql": "SELECT table_schema, table_name, ROUND(data_length/1024/1024, 2) AS data_mb, ROUND(data_free/1024/1024, 2) AS free_mb, ROUND(data_free*100/GREATEST(data_length+data_free,1), 2) AS frag_pct FROM information_schema.tables WHERE data_free > 0 AND table_schema NOT IN ('mysql','information_schema','performance_schema','sys') ORDER BY data_free DESC LIMIT 30", "desc_zh": "碎片率 TOP 30 表", "desc_en": "Top 30 fragmented tables" }
-          ] },
-        { "chapter_number": 13, "chapter_title_zh": "索引使用情况", "chapter_title_en": "Index Usage Analysis", "description": "未使用与冗余索引",
-          "queries": [
-            { "key": "mysql_unused_indexes", "sql": "SELECT object_schema, object_name, index_name FROM performance_schema.table_io_waits_summary_by_index_usage WHERE index_name IS NOT NULL AND index_name <> 'PRIMARY' AND count_star = 0 ORDER BY object_schema, object_name", "desc_zh": "从未被使用的索引", "desc_en": "Never-used indexes" }
-          ] },
-        { "chapter_number": 14, "chapter_title_zh": "主从复制延迟", "chapter_title_en": "Replication Lag", "description": "复制延迟监控",
-          "queries": [
-            { "key": "mysql_replica_lag", "sql": "SELECT CHANNEL_NAME, SERVICE_STATE, LAST_ERROR_MESSAGE, SECONDS_BEHIND_SOURCE FROM performance_schema.replication_connection_status", "desc_zh": "复制延迟与错误", "desc_en": "Replication lag and errors" }
-          ] },
-        { "chapter_number": 15, "chapter_title_zh": "Binlog 状态", "chapter_title_en": "Binary Log Status", "description": "binlog 配置与占用",
-          "queries": [
-            { "key": "mysql_binlog_status", "sql": "SHOW VARIABLES WHERE Variable_name IN ('log_bin','binlog_format','sync_binlog','expire_logs_days','binlog_expire_logs_seconds')", "desc_zh": "binlog 相关配置", "desc_en": "Binary log configuration" },
-            { "key": "mysql_binlog_size", "sql": "SHOW BINARY LOGS", "desc_zh": "binlog 文件与大小", "desc_en": "Binary log files and sizes" }
-          ] },
-        { "chapter_number": 16, "chapter_title_zh": "用户权限审计", "chapter_title_en": "User Privilege Audit", "description": "高权限账号审计",
-          "queries": [
-            { "key": "mysql_super_users", "sql": "SELECT user, host FROM mysql.user WHERE Super_priv = 'Y' OR Grant_priv = 'Y' ORDER BY user", "desc_zh": "具备 SUPER/GRANT 权限的账号", "desc_en": "Accounts with SUPER/GRANT privilege" }
-          ] },
-        { "chapter_number": 17, "chapter_title_zh": "存储引擎状态", "chapter_title_en": "Storage Engine Status", "description": "引擎分布与非 InnoDB 表",
-          "queries": [
-            { "key": "mysql_engine_distribution", "sql": "SELECT engine, COUNT(*) AS tables, ROUND(SUM(data_length+index_length)/1024/1024, 2) AS size_mb FROM information_schema.tables WHERE table_schema NOT IN ('mysql','information_schema','performance_schema','sys') GROUP BY engine ORDER BY tables DESC", "desc_zh": "存储引擎分布", "desc_en": "Storage engine distribution" },
-            { "key": "mysql_non_innodb", "sql": "SELECT table_schema, table_name, engine FROM information_schema.tables WHERE engine <> 'InnoDB' AND engine IS NOT NULL AND table_schema NOT IN ('mysql','information_schema','performance_schema','sys')", "desc_zh": "非 InnoDB 表清单", "desc_en": "Non-InnoDB tables" }
-          ] },
-        { "chapter_number": 18, "chapter_title_zh": "系统变量检查", "chapter_title_en": "System Variables Check", "description": "字符集与时区",
-          "queries": [
-            { "key": "mysql_charset", "sql": "SHOW VARIABLES WHERE Variable_name IN ('character_set_server','collation_server','character_set_database','time_zone','system_time_zone','lower_case_table_names')", "desc_zh": "字符集与时区配置", "desc_en": "Charset and timezone config" }
-          ] },
-        { "chapter_number": 19, "chapter_title_zh": "错误日志检查", "chapter_title_en": "Error Log Check", "description": "错误日志路径与告警计数",
-          "queries": [
-            { "key": "mysql_error_log_config", "sql": "SHOW VARIABLES WHERE Variable_name IN ('log_error','log_error_verbosity','log_warnings')", "desc_zh": "错误日志配置", "desc_en": "Error log configuration" },
-            { "key": "mysql_error_counters", "sql": "SHOW GLOBAL STATUS WHERE Variable_name IN ('Aborted_clients','Aborted_connects','Connection_errors_internal','Table_locks_waited')", "desc_zh": "异常计数指标", "desc_en": "Abnormal counters" }
-          ] },
-        { "chapter_number": 20, "chapter_title_zh": "计划任务和事件", "chapter_title_en": "Scheduled Events", "description": "事件调度器与已定义事件",
-          "queries": [
-            { "key": "mysql_events", "sql": "SELECT event_schema, event_name, status, interval_value, interval_field, last_executed FROM information_schema.events ORDER BY event_schema, event_name", "desc_zh": "已定义事件清单", "desc_en": "Defined events" },
-            { "key": "mysql_event_scheduler", "sql": "SHOW VARIABLES LIKE 'event_scheduler'", "desc_zh": "事件调度器开关", "desc_en": "Event scheduler switch" }
-          ] },
-        { "chapter_number": 21, "chapter_title_zh": "InnoDB 表空间状态", "chapter_title_en": "InnoDB Tablespace Status", "description": "表空间文件与独立表空间",
-          "queries": [
-            { "key": "mysql_innodb_tablespaces", "sql": "SELECT name, space_type, ROUND(file_size/1024/1024, 2) AS size_mb, row_format FROM information_schema.innodb_tablespaces ORDER BY file_size DESC LIMIT 30", "desc_zh": "InnoDB 表空间文件", "desc_en": "InnoDB tablespace files" }
-          ] }
+        {
+          "chapter_number": 1,
+          "chapter_title_zh": "健康状态概览",
+          "chapter_title_en": "Health Overview",
+          "description": "数据库整体健康状态概览",
+          "rule_keys": [
+            "mysql_version",
+            "mysql_uptime"
+          ]
+        },
+        {
+          "chapter_number": 2,
+          "chapter_title_zh": "连接状态检查",
+          "chapter_title_en": "Connection Status",
+          "description": "连接数与异常连接",
+          "rule_keys": [
+            "mysql_connection_stats",
+            "mysql_max_connections"
+          ]
+        },
+        {
+          "chapter_number": 3,
+          "chapter_title_zh": "配置参数检查",
+          "chapter_title_en": "Configuration Check",
+          "description": "关键参数与基线比对",
+          "rule_keys": [
+            "mysql_key_variables"
+          ]
+        },
+        {
+          "chapter_number": 4,
+          "chapter_title_zh": "性能分析",
+          "chapter_title_en": "Performance Analysis",
+          "description": "QPS/TPS 与缓冲池命中率",
+          "rule_keys": [
+            "mysql_qps_tps",
+            "mysql_innodb_hit_rate"
+          ]
+        },
+        {
+          "chapter_number": 5,
+          "chapter_title_zh": "数据库空间使用",
+          "chapter_title_en": "Database Space Usage",
+          "description": "各库容量与占比",
+          "rule_keys": [
+            "mysql_db_size"
+          ]
+        },
+        {
+          "chapter_number": 6,
+          "chapter_title_zh": "安全信息",
+          "chapter_title_en": "Security Information",
+          "description": "账号与权限审计",
+          "rule_keys": [
+            "mysql_users",
+            "mysql_empty_password"
+          ]
+        },
+        {
+          "chapter_number": 7,
+          "chapter_title_zh": "复制状态检查",
+          "chapter_title_en": "Replication Status",
+          "description": "主从复制运行状态",
+          "rule_keys": [
+            "mysql_slave_status"
+          ]
+        },
+        {
+          "chapter_number": 8,
+          "chapter_title_zh": "InnoDB 锁等待检查",
+          "chapter_title_en": "InnoDB Lock Analysis",
+          "description": "锁等待与死锁",
+          "rule_keys": [
+            "mysql_lock_waits",
+            "mysql_long_trx"
+          ]
+        },
+        {
+          "chapter_number": 9,
+          "chapter_title_zh": "缓冲池状态",
+          "chapter_title_en": "Buffer Pool Status",
+          "description": "InnoDB 缓冲池明细",
+          "rule_keys": [
+            "mysql_buffer_pool_status"
+          ]
+        },
+        {
+          "chapter_number": 10,
+          "chapter_title_zh": "事务和锁分析",
+          "chapter_title_en": "Transaction & Lock Analysis",
+          "description": "当前活动事务",
+          "rule_keys": [
+            "mysql_processlist"
+          ]
+        },
+        {
+          "chapter_number": 11,
+          "chapter_title_zh": "慢查询分析",
+          "chapter_title_en": "Slow Query Analysis",
+          "description": "按耗时聚合的慢 SQL",
+          "rule_keys": [
+            "mysql_slow_digest"
+          ]
+        },
+        {
+          "chapter_number": 12,
+          "chapter_title_zh": "表碎片和统计信息",
+          "chapter_title_en": "Table Fragmentation & Statistics",
+          "description": "碎片与统计信息新鲜度",
+          "rule_keys": [
+            "mysql_table_fragmentation"
+          ]
+        },
+        {
+          "chapter_number": 13,
+          "chapter_title_zh": "索引使用情况",
+          "chapter_title_en": "Index Usage Analysis",
+          "description": "未使用与冗余索引",
+          "rule_keys": [
+            "mysql_unused_indexes"
+          ]
+        },
+        {
+          "chapter_number": 14,
+          "chapter_title_zh": "主从复制延迟",
+          "chapter_title_en": "Replication Lag",
+          "description": "复制延迟监控",
+          "rule_keys": [
+            "mysql_replica_lag"
+          ]
+        },
+        {
+          "chapter_number": 15,
+          "chapter_title_zh": "Binlog 状态",
+          "chapter_title_en": "Binary Log Status",
+          "description": "binlog 配置与占用",
+          "rule_keys": [
+            "mysql_binlog_status",
+            "mysql_binlog_size"
+          ]
+        },
+        {
+          "chapter_number": 16,
+          "chapter_title_zh": "用户权限审计",
+          "chapter_title_en": "User Privilege Audit",
+          "description": "高权限账号审计",
+          "rule_keys": [
+            "mysql_super_users"
+          ]
+        },
+        {
+          "chapter_number": 17,
+          "chapter_title_zh": "存储引擎状态",
+          "chapter_title_en": "Storage Engine Status",
+          "description": "引擎分布与非 InnoDB 表",
+          "rule_keys": [
+            "mysql_engine_distribution",
+            "mysql_non_innodb"
+          ]
+        },
+        {
+          "chapter_number": 18,
+          "chapter_title_zh": "系统变量检查",
+          "chapter_title_en": "System Variables Check",
+          "description": "字符集与时区",
+          "rule_keys": [
+            "mysql_charset"
+          ]
+        },
+        {
+          "chapter_number": 19,
+          "chapter_title_zh": "错误日志检查",
+          "chapter_title_en": "Error Log Check",
+          "description": "错误日志路径与告警计数",
+          "rule_keys": [
+            "mysql_error_log_config",
+            "mysql_error_counters"
+          ]
+        },
+        {
+          "chapter_number": 20,
+          "chapter_title_zh": "计划任务和事件",
+          "chapter_title_en": "Scheduled Events",
+          "description": "事件调度器与已定义事件",
+          "rule_keys": [
+            "mysql_events",
+            "mysql_event_scheduler"
+          ]
+        },
+        {
+          "chapter_number": 21,
+          "chapter_title_zh": "InnoDB 表空间状态",
+          "chapter_title_en": "InnoDB Tablespace Status",
+          "description": "表空间文件与独立表空间",
+          "rule_keys": [
+            "mysql_innodb_tablespaces"
+          ]
+        }
       ]
     },
-
     {
       "db_type": "postgresql",
       "template_name_zh": "PostgreSQL 默认巡检模板",
@@ -214,100 +423,205 @@
       "is_preset": 1,
       "description": "适用于 PostgreSQL 10+，覆盖连接、缓存、锁、膨胀、WAL、复制、事务 ID 回卷等 21 个维度",
       "chapters": [
-        { "chapter_number": 1, "chapter_title_zh": "健康状态概览", "chapter_title_en": "Health Overview", "description": "数据库整体健康状态概览",
-          "queries": [
-            { "key": "pg_version", "sql": "SELECT version()", "desc_zh": "获取 PostgreSQL 版本", "desc_en": "Get PostgreSQL version" },
-            { "key": "pg_uptime", "sql": "SELECT pg_postmaster_start_time() AS start_time, now() - pg_postmaster_start_time() AS uptime", "desc_zh": "实例启动时间与运行时长", "desc_en": "Start time and uptime" }
-          ] },
-        { "chapter_number": 2, "chapter_title_zh": "数据库基本信息", "chapter_title_en": "Database Basic Info", "description": "数据库标识与容量",
-          "queries": [
-            { "key": "pg_database_info", "sql": "SELECT current_database() AS database, pg_size_pretty(pg_database_size(current_database())) AS size, current_user AS current_user", "desc_zh": "当前库信息与容量", "desc_en": "Current database info and size" }
-          ] },
-        { "chapter_number": 3, "chapter_title_zh": "连接状态检查", "chapter_title_en": "Connection Status", "description": "连接分布与上限",
-          "queries": [
-            { "key": "pg_connection_states", "sql": "SELECT COALESCE(state, 'unknown') AS state, COUNT(*) AS cnt FROM pg_stat_activity GROUP BY state ORDER BY cnt DESC", "desc_zh": "会话状态分布", "desc_en": "Session state distribution" },
-            { "key": "pg_max_connections", "sql": "SHOW max_connections", "desc_zh": "最大连接数", "desc_en": "Max connections" }
-          ] },
-        { "chapter_number": 4, "chapter_title_zh": "配置参数检查", "chapter_title_en": "Configuration Check", "description": "关键参数与基线比对",
-          "queries": [
-            { "key": "pg_key_settings", "sql": "SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','maintenance_work_mem','effective_cache_size','wal_level','archive_mode','autovacuum','password_encryption','ssl') ORDER BY name", "desc_zh": "关键配置参数", "desc_en": "Key configuration parameters" }
-          ] },
-        { "chapter_number": 5, "chapter_title_zh": "性能分析", "chapter_title_en": "Performance Analysis", "description": "事务提交与回滚统计",
-          "queries": [
-            { "key": "pg_db_stats", "sql": "SELECT datname, numbackends, xact_commit, xact_rollback, blks_read, blks_hit, tup_returned, tup_fetched, deadlocks FROM pg_stat_database WHERE datname NOT LIKE 'template%' ORDER BY datname", "desc_zh": "各库事务与 IO 统计", "desc_en": "Per-database transaction and IO stats" }
-          ] },
-        { "chapter_number": 6, "chapter_title_zh": "数据库空间使用", "chapter_title_en": "Database Space Usage", "description": "各库容量排序",
-          "queries": [
-            { "key": "pg_database_sizes", "sql": "SELECT datname, pg_size_pretty(pg_database_size(datname)) AS size, pg_database_size(datname) AS size_bytes FROM pg_database ORDER BY pg_database_size(datname) DESC", "desc_zh": "各库容量", "desc_en": "Per-database sizes" }
-          ] },
-        { "chapter_number": 7, "chapter_title_zh": "表与索引大小", "chapter_title_en": "Table & Index Sizes", "description": "大表与索引占用",
-          "queries": [
-            { "key": "pg_top_tables", "sql": "SELECT schemaname, relname, pg_size_pretty(pg_total_relation_size(relid)) AS total_size, pg_size_pretty(pg_relation_size(relid)) AS table_size, pg_size_pretty(pg_total_relation_size(relid) - pg_relation_size(relid)) AS index_size, n_live_tup FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 20", "desc_zh": "TOP 20 大表", "desc_en": "Top 20 largest tables" }
-          ] },
-        { "chapter_number": 8, "chapter_title_zh": "缓存命中率", "chapter_title_en": "Cache Hit Ratio", "description": "共享缓冲区命中率",
-          "queries": [
-            { "key": "pg_cache_hit_ratio", "sql": "SELECT datname, ROUND(SUM(blks_hit)*100.0/NULLIF(SUM(blks_hit+blks_read),0), 2) AS cache_hit_pct FROM pg_stat_database WHERE datname NOT LIKE 'template%' GROUP BY datname ORDER BY cache_hit_pct", "desc_zh": "各库缓存命中率", "desc_en": "Cache hit ratio per database" }
-          ] },
-        { "chapter_number": 9, "chapter_title_zh": "事务与锁", "chapter_title_en": "Transactions & Locks", "description": "锁等待与阻塞链",
-          "queries": [
-            { "key": "pg_blocking", "sql": "SELECT blocked.pid AS blocked_pid, blocked.usename AS blocked_user, blocking.pid AS blocking_pid, blocking.usename AS blocking_user, LEFT(blocked.query, 120) AS blocked_query FROM pg_stat_activity blocked JOIN pg_stat_activity blocking ON blocking.pid = ANY(pg_blocking_pids(blocked.pid))", "desc_zh": "当前阻塞链", "desc_en": "Current blocking chains" },
-            { "key": "pg_lock_counts", "sql": "SELECT mode, COUNT(*) AS cnt FROM pg_locks GROUP BY mode ORDER BY cnt DESC", "desc_zh": "锁模式分布", "desc_en": "Lock mode distribution" }
-          ] },
-        { "chapter_number": 10, "chapter_title_zh": "长事务与空闲事务", "chapter_title_en": "Long & Idle Transactions", "description": "长事务与空闲事务识别",
-          "queries": [
-            { "key": "pg_long_transactions", "sql": "SELECT pid, usename, state, now() - xact_start AS xact_duration, now() - state_change AS state_duration, LEFT(query, 120) AS query FROM pg_stat_activity WHERE xact_start IS NOT NULL AND state <> 'idle' ORDER BY xact_start LIMIT 20", "desc_zh": "长事务 TOP 20", "desc_en": "Top 20 long transactions" },
-            { "key": "pg_idle_in_transaction", "sql": "SELECT pid, usename, state, now() - state_change AS idle_duration, LEFT(query, 120) AS query FROM pg_stat_activity WHERE state = 'idle in transaction' ORDER BY state_change", "desc_zh": "事务中空闲会话", "desc_en": "Idle-in-transaction sessions" }
-          ] },
-        { "chapter_number": 11, "chapter_title_zh": "慢查询分析", "chapter_title_en": "Slow Query Analysis", "description": "需 pg_stat_statements 扩展",
-          "queries": [
-            { "key": "pg_slow_queries", "sql": "SELECT queryid, LEFT(query, 150) AS query, calls, ROUND(total_exec_time::numeric, 2) AS total_ms, ROUND(mean_exec_time::numeric, 2) AS mean_ms, rows FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20", "desc_zh": "TOP 20 慢 SQL（需 pg_stat_statements）", "desc_en": "Top 20 slow queries (requires pg_stat_statements)" }
-          ] },
-        { "chapter_number": 12, "chapter_title_zh": "索引健康分析", "chapter_title_en": "Index Health", "description": "未使用与冗余索引",
-          "queries": [
-            { "key": "pg_unused_indexes", "sql": "SELECT schemaname, relname, indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid)) AS index_size FROM pg_stat_user_indexes WHERE idx_scan = 0 ORDER BY pg_relation_size(indexrelid) DESC LIMIT 30", "desc_zh": "从未被使用的索引", "desc_en": "Never-used indexes" },
-            { "key": "pg_missing_index_candidates", "sql": "SELECT schemaname, relname, seq_scan, seq_tup_read, idx_scan, n_live_tup FROM pg_stat_user_tables WHERE seq_scan > COALESCE(idx_scan, 0) AND n_live_tup > 10000 ORDER BY seq_tup_read DESC LIMIT 20", "desc_zh": "全表扫描偏多的表", "desc_en": "Tables with heavy sequential scans" }
-          ] },
-        { "chapter_number": 13, "chapter_title_zh": "表膨胀与碎片", "chapter_title_en": "Table Bloat", "description": "死元组与膨胀",
-          "queries": [
-            { "key": "pg_table_bloat", "sql": "SELECT schemaname, relname, n_live_tup, n_dead_tup, ROUND(n_dead_tup*100.0/GREATEST(n_live_tup+n_dead_tup,1), 2) AS dead_pct, last_vacuum, last_autovacuum FROM pg_stat_user_tables WHERE n_dead_tup > 0 ORDER BY n_dead_tup DESC LIMIT 30", "desc_zh": "死元组 TOP 30 表", "desc_en": "Top 30 tables by dead tuples" }
-          ] },
-        { "chapter_number": 14, "chapter_title_zh": "WAL 与检查点", "chapter_title_en": "WAL & Checkpoints", "description": "WAL 生成与检查点频率",
-          "queries": [
-            { "key": "pg_checkpoint_stats", "sql": "SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, checkpoint_sync_time, buffers_checkpoint, buffers_clean, maxwritten_clean FROM pg_stat_bgwriter", "desc_zh": "检查点统计", "desc_en": "Checkpoint statistics" },
-            { "key": "pg_wal_stats", "sql": "SELECT wal_records, wal_fpi, pg_size_pretty(wal_bytes) AS wal_size, wal_buffers_full FROM pg_stat_wal", "desc_zh": "WAL 生成统计（PG14+）", "desc_en": "WAL statistics (PG14+)" }
-          ] },
-        { "chapter_number": 15, "chapter_title_zh": "复制状态", "chapter_title_en": "Replication Status", "description": "流复制与延迟",
-          "queries": [
-            { "key": "pg_replication", "sql": "SELECT client_addr, state, sync_state, sent_lsn, replay_lsn, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_lag_bytes FROM pg_stat_replication", "desc_zh": "流复制状态与延迟", "desc_en": "Streaming replication status and lag" },
-            { "key": "pg_replication_slots", "sql": "SELECT slot_name, slot_type, active, restart_lsn, confirmed_flush_lsn FROM pg_replication_slots", "desc_zh": "复制槽状态", "desc_en": "Replication slot status" }
-          ] },
-        { "chapter_number": 16, "chapter_title_zh": "数据库年龄与事务ID", "chapter_title_en": "Database Age & XID", "description": "事务 ID 回卷风险",
-          "queries": [
-            { "key": "pg_database_age", "sql": "SELECT datname, age(datfrozenxid) AS xid_age, ROUND(age(datfrozenxid)*100.0/2000000000, 2) AS pct_toward_wraparound FROM pg_database ORDER BY age(datfrozenxid) DESC", "desc_zh": "各库事务 ID 年龄（回卷风险）", "desc_en": "XID age per database (wraparound risk)" }
-          ] },
-        { "chapter_number": 17, "chapter_title_zh": "自动清理状态", "chapter_title_en": "Autovacuum Status", "description": "autovacuum 运行情况",
-          "queries": [
-            { "key": "pg_autovacuum_settings", "sql": "SELECT name, setting FROM pg_settings WHERE name IN ('autovacuum','autovacuum_max_workers','autovacuum_naptime','autovacuum_vacuum_scale_factor') ORDER BY name", "desc_zh": "autovacuum 配置", "desc_en": "Autovacuum configuration" },
-            { "key": "pg_never_vacuumed", "sql": "SELECT schemaname, relname, n_live_tup, last_vacuum, last_autovacuum FROM pg_stat_user_tables WHERE last_vacuum IS NULL AND last_autovacuum IS NULL AND n_live_tup > 1000 ORDER BY n_live_tup DESC LIMIT 20", "desc_zh": "从未清理过的大表", "desc_en": "Never-vacuumed large tables" }
-          ] },
-        { "chapter_number": 18, "chapter_title_zh": "安全与权限审计", "chapter_title_en": "Security & Privilege Audit", "description": "角色权限与连接安全",
-          "queries": [
-            { "key": "pg_superusers", "sql": "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolreplication FROM pg_roles WHERE rolsuper OR rolcreatedb OR rolcreaterole ORDER BY rolname", "desc_zh": "高权限角色清单", "desc_en": "Privileged role list" },
-            { "key": "pg_security_settings", "sql": "SELECT name, setting FROM pg_settings WHERE name IN ('ssl','password_encryption','log_connections','log_disconnections') ORDER BY name", "desc_zh": "连接安全相关参数", "desc_en": "Connection security parameters" }
-          ] },
-        { "chapter_number": 19, "chapter_title_zh": "备份状态", "chapter_title_en": "Backup Status", "description": "归档与基础备份",
-          "queries": [
-            { "key": "pg_archive_status", "sql": "SELECT name, setting FROM pg_settings WHERE name IN ('archive_mode','archive_command','archive_timeout') ORDER BY name", "desc_zh": "归档配置", "desc_en": "Archive configuration" },
-            { "key": "pg_backup_history", "sql": "SELECT * FROM pg_stat_archiver", "desc_zh": "归档器统计", "desc_en": "Archiver statistics" }
-          ] },
-        { "chapter_number": 20, "chapter_title_zh": "扩展与插件", "chapter_title_en": "Extensions & Plugins", "description": "已安装扩展",
-          "queries": [
-            { "key": "pg_extensions", "sql": "SELECT extname, extversion FROM pg_extension ORDER BY extname", "desc_zh": "已安装扩展清单", "desc_en": "Installed extension list" }
-          ] },
-        { "chapter_number": 21, "chapter_title_zh": "风险与建议", "chapter_title_en": "Risks & Recommendations", "description": "汇总风险项并给出修复建议", "queries": [] }
+        {
+          "chapter_number": 1,
+          "chapter_title_zh": "健康状态概览",
+          "chapter_title_en": "Health Overview",
+          "description": "数据库整体健康状态概览",
+          "rule_keys": [
+            "pg_version",
+            "pg_uptime"
+          ]
+        },
+        {
+          "chapter_number": 2,
+          "chapter_title_zh": "数据库基本信息",
+          "chapter_title_en": "Database Basic Info",
+          "description": "数据库标识与容量",
+          "rule_keys": [
+            "pg_database_info"
+          ]
+        },
+        {
+          "chapter_number": 3,
+          "chapter_title_zh": "连接状态检查",
+          "chapter_title_en": "Connection Status",
+          "description": "连接分布与上限",
+          "rule_keys": [
+            "pg_connection_states",
+            "pg_max_connections"
+          ]
+        },
+        {
+          "chapter_number": 4,
+          "chapter_title_zh": "配置参数检查",
+          "chapter_title_en": "Configuration Check",
+          "description": "关键参数与基线比对",
+          "rule_keys": [
+            "pg_key_settings"
+          ]
+        },
+        {
+          "chapter_number": 5,
+          "chapter_title_zh": "性能分析",
+          "chapter_title_en": "Performance Analysis",
+          "description": "事务提交与回滚统计",
+          "rule_keys": [
+            "pg_db_stats"
+          ]
+        },
+        {
+          "chapter_number": 6,
+          "chapter_title_zh": "数据库空间使用",
+          "chapter_title_en": "Database Space Usage",
+          "description": "各库容量排序",
+          "rule_keys": [
+            "pg_database_sizes"
+          ]
+        },
+        {
+          "chapter_number": 7,
+          "chapter_title_zh": "表与索引大小",
+          "chapter_title_en": "Table & Index Sizes",
+          "description": "大表与索引占用",
+          "rule_keys": [
+            "pg_top_tables"
+          ]
+        },
+        {
+          "chapter_number": 8,
+          "chapter_title_zh": "缓存命中率",
+          "chapter_title_en": "Cache Hit Ratio",
+          "description": "共享缓冲区命中率",
+          "rule_keys": [
+            "pg_cache_hit_ratio"
+          ]
+        },
+        {
+          "chapter_number": 9,
+          "chapter_title_zh": "事务与锁",
+          "chapter_title_en": "Transactions & Locks",
+          "description": "锁等待与阻塞链",
+          "rule_keys": [
+            "pg_blocking",
+            "pg_lock_counts"
+          ]
+        },
+        {
+          "chapter_number": 10,
+          "chapter_title_zh": "长事务与空闲事务",
+          "chapter_title_en": "Long & Idle Transactions",
+          "description": "长事务与空闲事务识别",
+          "rule_keys": [
+            "pg_long_transactions",
+            "pg_idle_in_transaction"
+          ]
+        },
+        {
+          "chapter_number": 11,
+          "chapter_title_zh": "慢查询分析",
+          "chapter_title_en": "Slow Query Analysis",
+          "description": "需 pg_stat_statements 扩展",
+          "rule_keys": [
+            "pg_slow_queries"
+          ]
+        },
+        {
+          "chapter_number": 12,
+          "chapter_title_zh": "索引健康分析",
+          "chapter_title_en": "Index Health",
+          "description": "未使用与冗余索引",
+          "rule_keys": [
+            "pg_unused_indexes",
+            "pg_missing_index_candidates"
+          ]
+        },
+        {
+          "chapter_number": 13,
+          "chapter_title_zh": "表膨胀与碎片",
+          "chapter_title_en": "Table Bloat",
+          "description": "死元组与膨胀",
+          "rule_keys": [
+            "pg_table_bloat"
+          ]
+        },
+        {
+          "chapter_number": 14,
+          "chapter_title_zh": "WAL 与检查点",
+          "chapter_title_en": "WAL & Checkpoints",
+          "description": "WAL 生成与检查点频率",
+          "rule_keys": [
+            "pg_checkpoint_stats",
+            "pg_wal_stats"
+          ]
+        },
+        {
+          "chapter_number": 15,
+          "chapter_title_zh": "复制状态",
+          "chapter_title_en": "Replication Status",
+          "description": "流复制与延迟",
+          "rule_keys": [
+            "pg_replication",
+            "pg_replication_slots"
+          ]
+        },
+        {
+          "chapter_number": 16,
+          "chapter_title_zh": "数据库年龄与事务ID",
+          "chapter_title_en": "Database Age & XID",
+          "description": "事务 ID 回卷风险",
+          "rule_keys": [
+            "pg_database_age"
+          ]
+        },
+        {
+          "chapter_number": 17,
+          "chapter_title_zh": "自动清理状态",
+          "chapter_title_en": "Autovacuum Status",
+          "description": "autovacuum 运行情况",
+          "rule_keys": [
+            "pg_autovacuum_settings",
+            "pg_never_vacuumed"
+          ]
+        },
+        {
+          "chapter_number": 18,
+          "chapter_title_zh": "安全与权限审计",
+          "chapter_title_en": "Security & Privilege Audit",
+          "description": "角色权限与连接安全",
+          "rule_keys": [
+            "pg_superusers",
+            "pg_security_settings"
+          ]
+        },
+        {
+          "chapter_number": 19,
+          "chapter_title_zh": "备份状态",
+          "chapter_title_en": "Backup Status",
+          "description": "归档与基础备份",
+          "rule_keys": [
+            "pg_archive_status",
+            "pg_backup_history"
+          ]
+        },
+        {
+          "chapter_number": 20,
+          "chapter_title_zh": "扩展与插件",
+          "chapter_title_en": "Extensions & Plugins",
+          "description": "已安装扩展",
+          "rule_keys": [
+            "pg_extensions"
+          ]
+        },
+        {
+          "chapter_number": 21,
+          "chapter_title_zh": "风险与建议",
+          "chapter_title_en": "Risks & Recommendations",
+          "description": "汇总风险项并给出修复建议",
+          "rule_keys": []
+        }
       ]
     },
-
     {
       "db_type": "sqlserver",
       "template_name_zh": "SQL Server 默认巡检模板",
@@ -317,95 +631,200 @@
       "is_preset": 1,
       "description": "适用于 SQL Server 2012+，覆盖实例、内存、等待统计、TOP SQL、缺失索引、备份作业等 21 个维度",
       "chapters": [
-        { "chapter_number": 1, "chapter_title_zh": "健康状态概览", "chapter_title_en": "Health Overview", "description": "实例整体健康状态概览",
-          "queries": [
-            { "key": "mssql_version", "sql": "SELECT @@VERSION AS version", "desc_zh": "获取 SQL Server 版本", "desc_en": "Get SQL Server version" },
-            { "key": "mssql_uptime", "sql": "SELECT sqlserver_start_time, DATEDIFF(HOUR, sqlserver_start_time, GETDATE()) AS uptime_hours FROM sys.dm_os_sys_info", "desc_zh": "实例启动时间与运行时长", "desc_en": "Start time and uptime" }
-          ] },
-        { "chapter_number": 2, "chapter_title_zh": "实例基本信息", "chapter_title_en": "Instance Basic Info", "description": "主机、版本与版本号",
-          "queries": [
-            { "key": "mssql_instance_info", "sql": "SELECT SERVERPROPERTY('MachineName') AS machine, SERVERPROPERTY('InstanceName') AS instance, SERVERPROPERTY('ProductVersion') AS product_version, SERVERPROPERTY('Edition') AS edition, SERVERPROPERTY('Collation') AS collation", "desc_zh": "实例基本信息", "desc_en": "Instance basic info" }
-          ] },
-        { "chapter_number": 3, "chapter_title_zh": "数据库列表与状态", "chapter_title_en": "Databases & Status", "description": "库状态与恢复模式",
-          "queries": [
-            { "key": "mssql_database_list", "sql": "SELECT name, state_desc, recovery_model_desc, compatibility_level, is_auto_close_on, is_trustworthy_on, page_verify_option_desc FROM sys.databases ORDER BY name", "desc_zh": "数据库清单与关键开关", "desc_en": "Database list and key switches" }
-          ] },
-        { "chapter_number": 4, "chapter_title_zh": "配置参数检查", "chapter_title_en": "Configuration Check", "description": "服务器级配置与基线比对",
-          "queries": [
-            { "key": "mssql_configurations", "sql": "SELECT name, value, value_in_use, is_dynamic, description FROM sys.configurations ORDER BY name", "desc_zh": "全部服务器配置项", "desc_en": "All server configurations" },
-            { "key": "mssql_memory_config", "sql": "SELECT name, value_in_use FROM sys.configurations WHERE name IN ('max server memory (MB)','min server memory (MB)')", "desc_zh": "内存上下限配置", "desc_en": "Memory limit configuration" }
-          ] },
-        { "chapter_number": 5, "chapter_title_zh": "内存使用", "chapter_title_en": "Memory Usage", "description": "内存分配与压力",
-          "queries": [
-            { "key": "mssql_memory_usage", "sql": "SELECT counter_name, cntr_value FROM sys.dm_os_performance_counters WHERE object_name LIKE '%Memory Manager%' AND counter_name IN ('Total Server Memory (KB)','Target Server Memory (KB)','Memory Grants Pending')", "desc_zh": "内存使用与待授予", "desc_en": "Memory usage and pending grants" }
-          ] },
-        { "chapter_number": 6, "chapter_title_zh": "文件与空间使用", "chapter_title_en": "Files & Space", "description": "数据文件与空间占用",
-          "queries": [
-            { "key": "mssql_file_sizes", "sql": "SELECT DB_NAME(database_id) AS db_name, name, type_desc, size*8/1024 AS size_mb, FILEPROPERTY(name, 'SpaceUsed')*8/1024 AS used_mb FROM sys.master_files ORDER BY size DESC", "desc_zh": "数据文件大小与使用", "desc_en": "Datafile sizes and usage" }
-          ] },
-        { "chapter_number": 7, "chapter_title_zh": "连接与会话", "chapter_title_en": "Connections & Sessions", "description": "会话分布与连接数",
-          "queries": [
-            { "key": "mssql_session_summary", "sql": "SELECT status, COUNT(*) AS cnt FROM sys.dm_exec_sessions WHERE is_user_process = 1 GROUP BY status ORDER BY cnt DESC", "desc_zh": "用户会话状态分布", "desc_en": "User session status distribution" },
-            { "key": "mssql_connection_count", "sql": "SELECT DB_NAME(dbid) AS db_name, COUNT(*) AS connections FROM sys.sysprocesses WHERE dbid > 0 GROUP BY DB_NAME(dbid) ORDER BY connections DESC", "desc_zh": "各库连接数", "desc_en": "Connections per database" }
-          ] },
-        { "chapter_number": 8, "chapter_title_zh": "等待统计", "chapter_title_en": "Wait Statistics", "description": "TOP 等待类型",
-          "queries": [
-            { "key": "mssql_top_waits", "sql": "SELECT TOP 20 wait_type, waiting_tasks_count, wait_time_ms, ROUND(wait_time_ms*100.0/SUM(wait_time_ms) OVER(), 2) AS pct FROM sys.dm_os_wait_stats WHERE wait_type NOT IN ('CLR_SEMAPHORE','LAZYWRITER_SLEEP','RESOURCE_QUEUE','SLEEP_TASK','SLEEP_SYSTEMTASK','SQLTRACE_BUFFER_FLUSH','WAITFOR','LOGMGR_QUEUE','CHECKPOINT_QUEUE','REQUEST_FOR_DEADLOCK_SEARCH','XE_TIMER_EVENT','BROKER_TO_FLUSH','BROKER_TASK_STOP','CLR_MANUAL_EVENT','CLR_AUTO_EVENT','DISPATCHER_QUEUE_SEMAPHORE','FT_IFTS_SCHEDULER_IDLE_WAIT','XE_DISPATCHER_WAIT','XE_DISPATCHER_JOIN','SQLTRACE_INCREMENTAL_FLUSH_SLEEP','ONDEMAND_TASK_QUEUE','BROKER_EVENTHANDLER','SLEEP_BPOOL_FLUSH','SQLTRACE_WAIT_ENTRIES','HADR_FILESTREAM_IOMGR_IOCOMPLETION') ORDER BY wait_time_ms DESC", "desc_zh": "TOP 20 等待类型", "desc_en": "Top 20 wait types" }
-          ] },
-        { "chapter_number": 9, "chapter_title_zh": "TOP SQL", "chapter_title_en": "Top SQL", "description": "按资源消耗排序的语句",
-          "queries": [
-            { "key": "mssql_top_sql_elapsed", "sql": "SELECT TOP 20 qs.total_elapsed_time/1000000 AS elapsed_sec, qs.execution_count, qs.total_worker_time/1000000 AS cpu_sec, qs.total_logical_reads, SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 200) AS query_text FROM sys.dm_exec_query_stats qs CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st ORDER BY qs.total_elapsed_time DESC", "desc_zh": "TOP 20 按耗时排序语句", "desc_en": "Top 20 statements by elapsed time" }
-          ] },
-        { "chapter_number": 10, "chapter_title_zh": "锁与阻塞", "chapter_title_en": "Locks & Blocking", "description": "当前阻塞与会话等待",
-          "queries": [
-            { "key": "mssql_blocking", "sql": "SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time, r.wait_resource, DB_NAME(r.database_id) AS db_name, SUBSTRING(t.text, (r.statement_start_offset/2)+1, 150) AS query_text FROM sys.dm_exec_requests r CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t WHERE r.blocking_session_id <> 0", "desc_zh": "当前阻塞会话", "desc_en": "Currently blocked sessions" }
-          ] },
-        { "chapter_number": 11, "chapter_title_zh": "索引健康分析", "chapter_title_en": "Index Health", "description": "索引使用情况",
-          "queries": [
-            { "key": "mssql_index_usage", "sql": "SELECT OBJECT_NAME(s.object_id) AS table_name, i.name AS index_name, s.user_seeks, s.user_scans, s.user_lookups, s.user_updates FROM sys.dm_db_index_usage_stats s JOIN sys.indexes i ON s.object_id = i.object_id AND s.index_id = i.index_id WHERE s.database_id = DB_ID() AND i.name IS NOT NULL AND s.user_seeks = 0 AND s.user_scans = 0 ORDER BY s.user_updates DESC", "desc_zh": "从未被查询使用的索引", "desc_en": "Never-read indexes" }
-          ] },
-        { "chapter_number": 12, "chapter_title_zh": "缺失索引", "chapter_title_en": "Missing Indexes", "description": "优化器建议的缺失索引",
-          "queries": [
-            { "key": "mssql_missing_indexes", "sql": "SELECT TOP 20 ROUND(migs.avg_total_user_cost * migs.avg_user_impact * (migs.user_seeks + migs.user_scans), 0) AS score, mid.statement AS table_name, mid.equality_columns, mid.inequality_columns, mid.included_columns, migs.user_seeks FROM sys.dm_db_missing_index_group_stats migs JOIN sys.dm_db_missing_index_groups mig ON migs.group_handle = mig.index_group_handle JOIN sys.dm_db_missing_index_details mid ON mig.index_handle = mid.index_handle ORDER BY score DESC", "desc_zh": "TOP 20 缺失索引建议", "desc_en": "Top 20 missing index suggestions" }
-          ] },
-        { "chapter_number": 13, "chapter_title_zh": "碎片与统计信息", "chapter_title_en": "Fragmentation & Statistics", "description": "索引碎片率与统计更新",
-          "queries": [
-            { "key": "mssql_index_fragmentation", "sql": "SELECT OBJECT_NAME(ips.object_id) AS table_name, i.name AS index_name, ips.index_type_desc, ROUND(ips.avg_fragmentation_in_percent, 2) AS frag_pct, ips.page_count FROM sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'LIMITED') ips JOIN sys.indexes i ON ips.object_id = i.object_id AND ips.index_id = i.index_id WHERE ips.avg_fragmentation_in_percent > 10 AND ips.page_count > 1000 ORDER BY ips.avg_fragmentation_in_percent DESC", "desc_zh": "碎片率 >10% 的索引", "desc_en": "Indexes with fragmentation >10%" },
-            { "key": "mssql_stale_statistics", "sql": "SELECT OBJECT_NAME(s.object_id) AS table_name, s.name AS stat_name, sp.last_updated, sp.rows, sp.rows_sampled FROM sys.stats s CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) sp WHERE sp.last_updated < DATEADD(DAY, -7, GETDATE()) ORDER BY sp.last_updated", "desc_zh": "超过 7 天未更新的统计信息", "desc_en": "Statistics not updated in 7 days" }
-          ] },
-        { "chapter_number": 14, "chapter_title_zh": "备份状态", "chapter_title_en": "Backup Status", "description": "最近备份与恢复就绪度",
-          "queries": [
-            { "key": "mssql_recent_backups", "sql": "SELECT database_name, type, backup_start_date, backup_finish_date, DATEDIFF(DAY, backup_finish_date, GETDATE()) AS days_ago, backup_size/1024/1024 AS size_mb FROM msdb.dbo.backupset WHERE backup_start_date > DATEADD(DAY, -30, GETDATE()) ORDER BY backup_finish_date DESC", "desc_zh": "近 30 天备份记录", "desc_en": "Backups in last 30 days" }
-          ] },
-        { "chapter_number": 15, "chapter_title_zh": "作业与维护计划", "chapter_title_en": "Jobs & Maintenance", "description": "SQL Agent 作业执行状态",
-          "queries": [
-            { "key": "mssql_jobs", "sql": "SELECT j.name AS job_name, j.enabled, h.run_status, h.run_date, h.run_duration FROM msdb.dbo.sysjobs j LEFT JOIN msdb.dbo.sysjobhistory h ON j.job_id = h.job_id AND h.step_id = 0 ORDER BY j.name", "desc_zh": "作业清单与上次执行结果", "desc_en": "Job list and last run result" }
-          ] },
-        { "chapter_number": 16, "chapter_title_zh": "错误日志", "chapter_title_en": "Error Log", "description": "近期错误日志条目",
-          "queries": [
-            { "key": "mssql_error_log", "sql": "EXEC sp_readerrorlog 0, 1", "desc_zh": "读取当前错误日志", "desc_en": "Read current error log" }
-          ] },
-        { "chapter_number": 17, "chapter_title_zh": "安全与权限审计", "chapter_title_en": "Security & Privilege Audit", "description": "登录名与高权限账号",
-          "queries": [
-            { "key": "mssql_logins", "sql": "SELECT name, type_desc, is_disabled, create_date, modify_date FROM sys.server_principals WHERE type IN ('S','U','G') ORDER BY name", "desc_zh": "服务器登录名清单", "desc_en": "Server login list" },
-            { "key": "mssql_sysadmin_members", "sql": "SELECT p.name AS login_name, p.type_desc FROM sys.server_role_members m JOIN sys.server_principals r ON m.role_principal_id = r.principal_id JOIN sys.server_principals p ON m.member_principal_id = p.principal_id WHERE r.name = 'sysadmin'", "desc_zh": "sysadmin 角色成员", "desc_en": "sysadmin role members" }
-          ] },
-        { "chapter_number": 18, "chapter_title_zh": "高可用", "chapter_title_en": "High Availability", "description": "镜像 / 可用性组 / 日志传送",
-          "queries": [
-            { "key": "mssql_hadr", "sql": "SELECT ag.name AS ag_name, ar.replica_server_name, ar.availability_mode_desc, ar.failover_mode_desc, drs.synchronization_state_desc, drs.synchronization_health_desc FROM sys.availability_groups ag JOIN sys.availability_replicas ar ON ag.group_id = ar.group_id LEFT JOIN sys.dm_hadr_database_replica_states drs ON ar.replica_id = drs.replica_id", "desc_zh": "可用性组状态（如未配置则空）", "desc_en": "Availability group status (empty if not configured)" }
-          ] },
-        { "chapter_number": 19, "chapter_title_zh": "tempdb 使用", "chapter_title_en": "tempdb Usage", "description": "tempdb 空间与争用",
-          "queries": [
-            { "key": "mssql_tempdb_usage", "sql": "SELECT SUM(unallocated_extent_page_count)*8/1024 AS free_mb, SUM(user_object_reserved_page_count)*8/1024 AS user_obj_mb, SUM(internal_object_reserved_page_count)*8/1024 AS internal_obj_mb, SUM(version_store_reserved_page_count)*8/1024 AS version_store_mb FROM tempdb.sys.dm_db_file_space_usage", "desc_zh": "tempdb 空间使用", "desc_en": "tempdb space usage" }
-          ] },
-        { "chapter_number": 20, "chapter_title_zh": "性能计数器", "chapter_title_en": "Performance Counters", "description": "缓冲池与页生命周期",
-          "queries": [
-            { "key": "mssql_buffer_counters", "sql": "SELECT counter_name, cntr_value FROM sys.dm_os_performance_counters WHERE object_name LIKE '%Buffer Manager%' AND counter_name IN ('Page life expectancy','Buffer cache hit ratio','Checkpoint pages/sec','Lazy writes/sec')", "desc_zh": "缓冲管理器关键计数器", "desc_en": "Buffer manager key counters" }
-          ] },
-        { "chapter_number": 21, "chapter_title_zh": "风险与建议", "chapter_title_en": "Risks & Recommendations", "description": "汇总风险项并给出修复建议", "queries": [] }
+        {
+          "chapter_number": 1,
+          "chapter_title_zh": "健康状态概览",
+          "chapter_title_en": "Health Overview",
+          "description": "实例整体健康状态概览",
+          "rule_keys": [
+            "mssql_version",
+            "mssql_uptime"
+          ]
+        },
+        {
+          "chapter_number": 2,
+          "chapter_title_zh": "实例基本信息",
+          "chapter_title_en": "Instance Basic Info",
+          "description": "主机、版本与版本号",
+          "rule_keys": [
+            "mssql_instance_info"
+          ]
+        },
+        {
+          "chapter_number": 3,
+          "chapter_title_zh": "数据库列表与状态",
+          "chapter_title_en": "Databases & Status",
+          "description": "库状态与恢复模式",
+          "rule_keys": [
+            "mssql_database_list"
+          ]
+        },
+        {
+          "chapter_number": 4,
+          "chapter_title_zh": "配置参数检查",
+          "chapter_title_en": "Configuration Check",
+          "description": "服务器级配置与基线比对",
+          "rule_keys": [
+            "mssql_configurations",
+            "mssql_memory_config"
+          ]
+        },
+        {
+          "chapter_number": 5,
+          "chapter_title_zh": "内存使用",
+          "chapter_title_en": "Memory Usage",
+          "description": "内存分配与压力",
+          "rule_keys": [
+            "mssql_memory_usage"
+          ]
+        },
+        {
+          "chapter_number": 6,
+          "chapter_title_zh": "文件与空间使用",
+          "chapter_title_en": "Files & Space",
+          "description": "数据文件与空间占用",
+          "rule_keys": [
+            "mssql_file_sizes"
+          ]
+        },
+        {
+          "chapter_number": 7,
+          "chapter_title_zh": "连接与会话",
+          "chapter_title_en": "Connections & Sessions",
+          "description": "会话分布与连接数",
+          "rule_keys": [
+            "mssql_session_summary",
+            "mssql_connection_count"
+          ]
+        },
+        {
+          "chapter_number": 8,
+          "chapter_title_zh": "等待统计",
+          "chapter_title_en": "Wait Statistics",
+          "description": "TOP 等待类型",
+          "rule_keys": [
+            "mssql_top_waits"
+          ]
+        },
+        {
+          "chapter_number": 9,
+          "chapter_title_zh": "TOP SQL",
+          "chapter_title_en": "Top SQL",
+          "description": "按资源消耗排序的语句",
+          "rule_keys": [
+            "mssql_top_sql_elapsed"
+          ]
+        },
+        {
+          "chapter_number": 10,
+          "chapter_title_zh": "锁与阻塞",
+          "chapter_title_en": "Locks & Blocking",
+          "description": "当前阻塞与会话等待",
+          "rule_keys": [
+            "mssql_blocking"
+          ]
+        },
+        {
+          "chapter_number": 11,
+          "chapter_title_zh": "索引健康分析",
+          "chapter_title_en": "Index Health",
+          "description": "索引使用情况",
+          "rule_keys": [
+            "mssql_index_usage"
+          ]
+        },
+        {
+          "chapter_number": 12,
+          "chapter_title_zh": "缺失索引",
+          "chapter_title_en": "Missing Indexes",
+          "description": "优化器建议的缺失索引",
+          "rule_keys": [
+            "mssql_missing_indexes"
+          ]
+        },
+        {
+          "chapter_number": 13,
+          "chapter_title_zh": "碎片与统计信息",
+          "chapter_title_en": "Fragmentation & Statistics",
+          "description": "索引碎片率与统计更新",
+          "rule_keys": [
+            "mssql_index_fragmentation",
+            "mssql_stale_statistics"
+          ]
+        },
+        {
+          "chapter_number": 14,
+          "chapter_title_zh": "备份状态",
+          "chapter_title_en": "Backup Status",
+          "description": "最近备份与恢复就绪度",
+          "rule_keys": [
+            "mssql_recent_backups"
+          ]
+        },
+        {
+          "chapter_number": 15,
+          "chapter_title_zh": "作业与维护计划",
+          "chapter_title_en": "Jobs & Maintenance",
+          "description": "SQL Agent 作业执行状态",
+          "rule_keys": [
+            "mssql_jobs"
+          ]
+        },
+        {
+          "chapter_number": 16,
+          "chapter_title_zh": "错误日志",
+          "chapter_title_en": "Error Log",
+          "description": "近期错误日志条目",
+          "rule_keys": [
+            "mssql_error_log"
+          ]
+        },
+        {
+          "chapter_number": 17,
+          "chapter_title_zh": "安全与权限审计",
+          "chapter_title_en": "Security & Privilege Audit",
+          "description": "登录名与高权限账号",
+          "rule_keys": [
+            "mssql_logins",
+            "mssql_sysadmin_members"
+          ]
+        },
+        {
+          "chapter_number": 18,
+          "chapter_title_zh": "高可用",
+          "chapter_title_en": "High Availability",
+          "description": "镜像 / 可用性组 / 日志传送",
+          "rule_keys": [
+            "mssql_hadr"
+          ]
+        },
+        {
+          "chapter_number": 19,
+          "chapter_title_zh": "tempdb 使用",
+          "chapter_title_en": "tempdb Usage",
+          "description": "tempdb 空间与争用",
+          "rule_keys": [
+            "mssql_tempdb_usage"
+          ]
+        },
+        {
+          "chapter_number": 20,
+          "chapter_title_zh": "性能计数器",
+          "chapter_title_en": "Performance Counters",
+          "description": "缓冲池与页生命周期",
+          "rule_keys": [
+            "mssql_buffer_counters"
+          ]
+        },
+        {
+          "chapter_number": 21,
+          "chapter_title_zh": "风险与建议",
+          "chapter_title_en": "Risks & Recommendations",
+          "description": "汇总风险项并给出修复建议",
+          "rule_keys": []
+        }
       ]
     },
-
     {
       "db_type": "kingbase",
       "template_name_zh": "KingbaseES 默认巡检模板",
@@ -415,90 +834,196 @@
       "is_preset": 1,
       "description": "适用于 KingbaseES V8+（PostgreSQL 兼容内核），巡检维度与 PostgreSQL 模板对齐",
       "chapters": [
-        { "chapter_number": 1, "chapter_title_zh": "健康状态概览", "chapter_title_en": "Health Overview", "description": "数据库整体健康状态概览",
-          "queries": [
-            { "key": "kb_version", "sql": "SELECT version()", "desc_zh": "获取 KingbaseES 版本", "desc_en": "Get KingbaseES version" },
-            { "key": "kb_uptime", "sql": "SELECT pg_postmaster_start_time() AS start_time, now() - pg_postmaster_start_time() AS uptime", "desc_zh": "实例启动时间与运行时长", "desc_en": "Start time and uptime" }
-          ] },
-        { "chapter_number": 2, "chapter_title_zh": "数据库基本信息", "chapter_title_en": "Database Basic Info", "description": "数据库标识与容量",
-          "queries": [
-            { "key": "kb_database_info", "sql": "SELECT current_database() AS database, pg_size_pretty(pg_database_size(current_database())) AS size, current_user AS current_user", "desc_zh": "当前库信息与容量", "desc_en": "Current database info and size" }
-          ] },
-        { "chapter_number": 3, "chapter_title_zh": "连接状态检查", "chapter_title_en": "Connection Status", "description": "连接分布与上限",
-          "queries": [
-            { "key": "kb_connection_states", "sql": "SELECT COALESCE(state, 'unknown') AS state, COUNT(*) AS cnt FROM pg_stat_activity GROUP BY state ORDER BY cnt DESC", "desc_zh": "会话状态分布", "desc_en": "Session state distribution" },
-            { "key": "kb_max_connections", "sql": "SHOW max_connections", "desc_zh": "最大连接数", "desc_en": "Max connections" }
-          ] },
-        { "chapter_number": 4, "chapter_title_zh": "配置参数检查", "chapter_title_en": "Configuration Check", "description": "关键参数与基线比对",
-          "queries": [
-            { "key": "kb_key_settings", "sql": "SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','maintenance_work_mem','effective_cache_size','wal_level','archive_mode','autovacuum','password_encryption','ssl') ORDER BY name", "desc_zh": "关键配置参数", "desc_en": "Key configuration parameters" }
-          ] },
-        { "chapter_number": 5, "chapter_title_zh": "性能分析", "chapter_title_en": "Performance Analysis", "description": "事务提交与回滚统计",
-          "queries": [
-            { "key": "kb_db_stats", "sql": "SELECT datname, numbackends, xact_commit, xact_rollback, blks_read, blks_hit, tup_returned, tup_fetched, deadlocks FROM pg_stat_database WHERE datname NOT LIKE 'template%' ORDER BY datname", "desc_zh": "各库事务与 IO 统计", "desc_en": "Per-database transaction and IO stats" }
-          ] },
-        { "chapter_number": 6, "chapter_title_zh": "数据库空间使用", "chapter_title_en": "Database Space Usage", "description": "各库容量排序",
-          "queries": [
-            { "key": "kb_database_sizes", "sql": "SELECT datname, pg_size_pretty(pg_database_size(datname)) AS size, pg_database_size(datname) AS size_bytes FROM pg_database ORDER BY pg_database_size(datname) DESC", "desc_zh": "各库容量", "desc_en": "Per-database sizes" }
-          ] },
-        { "chapter_number": 7, "chapter_title_zh": "表与索引大小", "chapter_title_en": "Table & Index Sizes", "description": "大表与索引占用",
-          "queries": [
-            { "key": "kb_top_tables", "sql": "SELECT schemaname, relname, pg_size_pretty(pg_total_relation_size(relid)) AS total_size, pg_size_pretty(pg_relation_size(relid)) AS table_size, pg_size_pretty(pg_total_relation_size(relid) - pg_relation_size(relid)) AS index_size, n_live_tup FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 20", "desc_zh": "TOP 20 大表", "desc_en": "Top 20 largest tables" }
-          ] },
-        { "chapter_number": 8, "chapter_title_zh": "缓存命中率", "chapter_title_en": "Cache Hit Ratio", "description": "共享缓冲区命中率",
-          "queries": [
-            { "key": "kb_cache_hit_ratio", "sql": "SELECT datname, ROUND(SUM(blks_hit)*100.0/NULLIF(SUM(blks_hit+blks_read),0), 2) AS cache_hit_pct FROM pg_stat_database WHERE datname NOT LIKE 'template%' GROUP BY datname ORDER BY cache_hit_pct", "desc_zh": "各库缓存命中率", "desc_en": "Cache hit ratio per database" }
-          ] },
-        { "chapter_number": 9, "chapter_title_zh": "事务与锁", "chapter_title_en": "Transactions & Locks", "description": "锁等待与阻塞链",
-          "queries": [
-            { "key": "kb_blocking", "sql": "SELECT blocked.pid AS blocked_pid, blocked.usename AS blocked_user, blocking.pid AS blocking_pid, blocking.usename AS blocking_user, LEFT(blocked.query, 120) AS blocked_query FROM pg_stat_activity blocked JOIN pg_stat_activity blocking ON blocking.pid = ANY(pg_blocking_pids(blocked.pid))", "desc_zh": "当前阻塞链", "desc_en": "Current blocking chains" }
-          ] },
-        { "chapter_number": 10, "chapter_title_zh": "长事务与空闲事务", "chapter_title_en": "Long & Idle Transactions", "description": "长事务与空闲事务识别",
-          "queries": [
-            { "key": "kb_long_transactions", "sql": "SELECT pid, usename, state, now() - xact_start AS xact_duration, LEFT(query, 120) AS query FROM pg_stat_activity WHERE xact_start IS NOT NULL AND state <> 'idle' ORDER BY xact_start LIMIT 20", "desc_zh": "长事务 TOP 20", "desc_en": "Top 20 long transactions" }
-          ] },
-        { "chapter_number": 11, "chapter_title_zh": "慢查询分析", "chapter_title_en": "Slow Query Analysis", "description": "需 sys_stat_statements 扩展",
-          "queries": [
-            { "key": "kb_slow_queries", "sql": "SELECT queryid, LEFT(query, 150) AS query, calls, ROUND(total_exec_time::numeric, 2) AS total_ms, ROUND(mean_exec_time::numeric, 2) AS mean_ms, rows FROM sys_stat_statements ORDER BY total_exec_time DESC LIMIT 20", "desc_zh": "TOP 20 慢 SQL（需 sys_stat_statements）", "desc_en": "Top 20 slow queries (requires sys_stat_statements)" }
-          ] },
-        { "chapter_number": 12, "chapter_title_zh": "索引健康分析", "chapter_title_en": "Index Health", "description": "未使用索引与全表扫描",
-          "queries": [
-            { "key": "kb_unused_indexes", "sql": "SELECT schemaname, relname, indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid)) AS index_size FROM pg_stat_user_indexes WHERE idx_scan = 0 ORDER BY pg_relation_size(indexrelid) DESC LIMIT 30", "desc_zh": "从未被使用的索引", "desc_en": "Never-used indexes" }
-          ] },
-        { "chapter_number": 13, "chapter_title_zh": "表膨胀与碎片", "chapter_title_en": "Table Bloat", "description": "死元组与膨胀",
-          "queries": [
-            { "key": "kb_table_bloat", "sql": "SELECT schemaname, relname, n_live_tup, n_dead_tup, ROUND(n_dead_tup*100.0/GREATEST(n_live_tup+n_dead_tup,1), 2) AS dead_pct, last_autovacuum FROM pg_stat_user_tables WHERE n_dead_tup > 0 ORDER BY n_dead_tup DESC LIMIT 30", "desc_zh": "死元组 TOP 30 表", "desc_en": "Top 30 tables by dead tuples" }
-          ] },
-        { "chapter_number": 14, "chapter_title_zh": "WAL 与检查点", "chapter_title_en": "WAL & Checkpoints", "description": "检查点与 WAL 生成",
-          "queries": [
-            { "key": "kb_checkpoint_stats", "sql": "SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, checkpoint_sync_time, buffers_checkpoint, buffers_clean FROM pg_stat_bgwriter", "desc_zh": "检查点统计", "desc_en": "Checkpoint statistics" }
-          ] },
-        { "chapter_number": 15, "chapter_title_zh": "复制状态", "chapter_title_en": "Replication Status", "description": "流复制与延迟",
-          "queries": [
-            { "key": "kb_replication", "sql": "SELECT client_addr, state, sync_state, sent_lsn, replay_lsn, pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_lag_bytes FROM pg_stat_replication", "desc_zh": "流复制状态与延迟", "desc_en": "Streaming replication status and lag" }
-          ] },
-        { "chapter_number": 16, "chapter_title_zh": "数据库年龄与事务ID", "chapter_title_en": "Database Age & XID", "description": "事务 ID 回卷风险",
-          "queries": [
-            { "key": "kb_database_age", "sql": "SELECT datname, age(datfrozenxid) AS xid_age, ROUND(age(datfrozenxid)*100.0/2000000000, 2) AS pct_toward_wraparound FROM pg_database ORDER BY age(datfrozenxid) DESC", "desc_zh": "各库事务 ID 年龄（回卷风险）", "desc_en": "XID age per database" }
-          ] },
-        { "chapter_number": 17, "chapter_title_zh": "自动清理状态", "chapter_title_en": "Autovacuum Status", "description": "autovacuum 运行情况",
-          "queries": [
-            { "key": "kb_autovacuum_settings", "sql": "SELECT name, setting FROM pg_settings WHERE name IN ('autovacuum','autovacuum_max_workers','autovacuum_naptime','autovacuum_vacuum_scale_factor') ORDER BY name", "desc_zh": "autovacuum 配置", "desc_en": "Autovacuum configuration" }
-          ] },
-        { "chapter_number": 18, "chapter_title_zh": "安全与权限审计", "chapter_title_en": "Security & Privilege Audit", "description": "角色权限与连接安全",
-          "queries": [
-            { "key": "kb_privileged_roles", "sql": "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole, rolcanlogin FROM pg_roles WHERE rolsuper OR rolcreatedb OR rolcreaterole ORDER BY rolname", "desc_zh": "高权限角色清单", "desc_en": "Privileged role list" },
-            { "key": "kb_security_settings", "sql": "SELECT name, setting FROM pg_settings WHERE name IN ('ssl','password_encryption','log_connections','log_disconnections') ORDER BY name", "desc_zh": "连接安全相关参数", "desc_en": "Connection security parameters" }
-          ] },
-        { "chapter_number": 19, "chapter_title_zh": "备份状态", "chapter_title_en": "Backup Status", "description": "归档与基础备份",
-          "queries": [
-            { "key": "kb_archive_status", "sql": "SELECT name, setting FROM pg_settings WHERE name IN ('archive_mode','archive_command','archive_timeout') ORDER BY name", "desc_zh": "归档配置", "desc_en": "Archive configuration" }
-          ] },
-        { "chapter_number": 20, "chapter_title_zh": "扩展与插件", "chapter_title_en": "Extensions & Plugins", "description": "已安装扩展",
-          "queries": [
-            { "key": "kb_extensions", "sql": "SELECT extname, extversion FROM pg_extension ORDER BY extname", "desc_zh": "已安装扩展清单", "desc_en": "Installed extension list" }
-          ] },
-        { "chapter_number": 21, "chapter_title_zh": "风险与建议", "chapter_title_en": "Risks & Recommendations", "description": "汇总风险项并给出修复建议", "queries": [] }
+        {
+          "chapter_number": 1,
+          "chapter_title_zh": "健康状态概览",
+          "chapter_title_en": "Health Overview",
+          "description": "数据库整体健康状态概览",
+          "rule_keys": [
+            "kb_version",
+            "kb_uptime"
+          ]
+        },
+        {
+          "chapter_number": 2,
+          "chapter_title_zh": "数据库基本信息",
+          "chapter_title_en": "Database Basic Info",
+          "description": "数据库标识与容量",
+          "rule_keys": [
+            "kb_database_info"
+          ]
+        },
+        {
+          "chapter_number": 3,
+          "chapter_title_zh": "连接状态检查",
+          "chapter_title_en": "Connection Status",
+          "description": "连接分布与上限",
+          "rule_keys": [
+            "kb_connection_states",
+            "kb_max_connections"
+          ]
+        },
+        {
+          "chapter_number": 4,
+          "chapter_title_zh": "配置参数检查",
+          "chapter_title_en": "Configuration Check",
+          "description": "关键参数与基线比对",
+          "rule_keys": [
+            "kb_key_settings"
+          ]
+        },
+        {
+          "chapter_number": 5,
+          "chapter_title_zh": "性能分析",
+          "chapter_title_en": "Performance Analysis",
+          "description": "事务提交与回滚统计",
+          "rule_keys": [
+            "kb_db_stats"
+          ]
+        },
+        {
+          "chapter_number": 6,
+          "chapter_title_zh": "数据库空间使用",
+          "chapter_title_en": "Database Space Usage",
+          "description": "各库容量排序",
+          "rule_keys": [
+            "kb_database_sizes"
+          ]
+        },
+        {
+          "chapter_number": 7,
+          "chapter_title_zh": "表与索引大小",
+          "chapter_title_en": "Table & Index Sizes",
+          "description": "大表与索引占用",
+          "rule_keys": [
+            "kb_top_tables"
+          ]
+        },
+        {
+          "chapter_number": 8,
+          "chapter_title_zh": "缓存命中率",
+          "chapter_title_en": "Cache Hit Ratio",
+          "description": "共享缓冲区命中率",
+          "rule_keys": [
+            "kb_cache_hit_ratio"
+          ]
+        },
+        {
+          "chapter_number": 9,
+          "chapter_title_zh": "事务与锁",
+          "chapter_title_en": "Transactions & Locks",
+          "description": "锁等待与阻塞链",
+          "rule_keys": [
+            "kb_blocking"
+          ]
+        },
+        {
+          "chapter_number": 10,
+          "chapter_title_zh": "长事务与空闲事务",
+          "chapter_title_en": "Long & Idle Transactions",
+          "description": "长事务与空闲事务识别",
+          "rule_keys": [
+            "kb_long_transactions"
+          ]
+        },
+        {
+          "chapter_number": 11,
+          "chapter_title_zh": "慢查询分析",
+          "chapter_title_en": "Slow Query Analysis",
+          "description": "需 sys_stat_statements 扩展",
+          "rule_keys": [
+            "kb_slow_queries"
+          ]
+        },
+        {
+          "chapter_number": 12,
+          "chapter_title_zh": "索引健康分析",
+          "chapter_title_en": "Index Health",
+          "description": "未使用索引与全表扫描",
+          "rule_keys": [
+            "kb_unused_indexes"
+          ]
+        },
+        {
+          "chapter_number": 13,
+          "chapter_title_zh": "表膨胀与碎片",
+          "chapter_title_en": "Table Bloat",
+          "description": "死元组与膨胀",
+          "rule_keys": [
+            "kb_table_bloat"
+          ]
+        },
+        {
+          "chapter_number": 14,
+          "chapter_title_zh": "WAL 与检查点",
+          "chapter_title_en": "WAL & Checkpoints",
+          "description": "检查点与 WAL 生成",
+          "rule_keys": [
+            "kb_checkpoint_stats"
+          ]
+        },
+        {
+          "chapter_number": 15,
+          "chapter_title_zh": "复制状态",
+          "chapter_title_en": "Replication Status",
+          "description": "流复制与延迟",
+          "rule_keys": [
+            "kb_replication"
+          ]
+        },
+        {
+          "chapter_number": 16,
+          "chapter_title_zh": "数据库年龄与事务ID",
+          "chapter_title_en": "Database Age & XID",
+          "description": "事务 ID 回卷风险",
+          "rule_keys": [
+            "kb_database_age"
+          ]
+        },
+        {
+          "chapter_number": 17,
+          "chapter_title_zh": "自动清理状态",
+          "chapter_title_en": "Autovacuum Status",
+          "description": "autovacuum 运行情况",
+          "rule_keys": [
+            "kb_autovacuum_settings"
+          ]
+        },
+        {
+          "chapter_number": 18,
+          "chapter_title_zh": "安全与权限审计",
+          "chapter_title_en": "Security & Privilege Audit",
+          "description": "角色权限与连接安全",
+          "rule_keys": [
+            "kb_privileged_roles",
+            "kb_security_settings"
+          ]
+        },
+        {
+          "chapter_number": 19,
+          "chapter_title_zh": "备份状态",
+          "chapter_title_en": "Backup Status",
+          "description": "归档与基础备份",
+          "rule_keys": [
+            "kb_archive_status"
+          ]
+        },
+        {
+          "chapter_number": 20,
+          "chapter_title_zh": "扩展与插件",
+          "chapter_title_en": "Extensions & Plugins",
+          "description": "已安装扩展",
+          "rule_keys": [
+            "kb_extensions"
+          ]
+        },
+        {
+          "chapter_number": 21,
+          "chapter_title_zh": "风险与建议",
+          "chapter_title_en": "Risks & Recommendations",
+          "description": "汇总风险项并给出修复建议",
+          "rule_keys": []
+        }
       ]
     },
     {
@@ -510,56 +1035,96 @@
       "is_preset": 1,
       "description": "针对平台内置 H2 自检库的巡检模板。用途不是「检查一个数据库的健康度」，而是让整条链路（驱动平台类加载 → 规则执行 → 结果集预览 → 基线采集与判定 → 落库与报告）在没有任何外部数据库的情况下也能真实跑通，便于部署后自验与回归测试。全部 SQL 只读 INFORMATION_SCHEMA 与内置函数，不写入、不建表。",
       "chapters": [
-        { "chapter_number": 1, "chapter_title_zh": "健康状态概览", "chapter_title_en": "Health Overview", "description": "版本、构建号与运行模式",
-          "queries": [
-            { "key": "h2_version", "sql": "SELECT H2VERSION() AS VERSION", "desc_zh": "H2 引擎版本", "desc_en": "H2 engine version" },
-            { "key": "h2_build_info", "sql": "SELECT SETTING_NAME, SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME IN ('info.VERSION','info.BUILD_ID','info.VERSION_MAJOR','info.VERSION_MINOR') ORDER BY SETTING_NAME", "desc_zh": "构建信息与版本号", "desc_en": "Build info and version numbers" },
-            { "key": "h2_db_mode", "sql": "SELECT SETTING_VALUE AS MODE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME='MODE'", "desc_zh": "兼容模式（REGULAR / MySQL / PostgreSQL 等）", "desc_en": "Compatibility mode" },
-            { "key": "h2_runtime", "sql": "SELECT SETTING_NAME, SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME LIKE 'property.%' ORDER BY SETTING_NAME", "desc_zh": "宿主 JVM 与操作系统信息", "desc_en": "Host JVM and OS info" }
-          ] },
-        { "chapter_number": 2, "chapter_title_zh": "数据库对象清单", "chapter_title_en": "Object Inventory", "description": "表、索引、序列、约束的数量与明细",
-          "queries": [
-            { "key": "h2_tables_by_schema", "sql": "SELECT TABLE_SCHEMA, COUNT(*) AS TABLE_CNT FROM INFORMATION_SCHEMA.TABLES GROUP BY TABLE_SCHEMA ORDER BY TABLE_CNT DESC", "desc_zh": "各 schema 下的对象数", "desc_en": "Object count per schema" },
-            { "key": "h2_object_summary", "sql": "SELECT 'TABLES' AS OBJECT_TYPE, COUNT(*) AS CNT FROM INFORMATION_SCHEMA.TABLES UNION ALL SELECT 'INDEXES', COUNT(*) FROM INFORMATION_SCHEMA.INDEXES UNION ALL SELECT 'SEQUENCES', COUNT(*) FROM INFORMATION_SCHEMA.SEQUENCES UNION ALL SELECT 'CONSTRAINTS', COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS", "desc_zh": "各类对象数量汇总", "desc_en": "Object count summary" },
-            { "key": "h2_sequences", "sql": "SELECT SEQUENCE_SCHEMA, SEQUENCE_NAME, START_VALUE, INCREMENT, CACHE FROM INFORMATION_SCHEMA.SEQUENCES ORDER BY SEQUENCE_SCHEMA, SEQUENCE_NAME", "desc_zh": "序列清单（空库无序列，属正常）", "desc_en": "Sequence list" },
-            { "key": "h2_indexes", "sql": "SELECT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, INDEX_TYPE_NAME FROM INFORMATION_SCHEMA.INDEXES ORDER BY TABLE_SCHEMA, TABLE_NAME", "desc_zh": "索引清单", "desc_en": "Index list" }
-          ] },
-        { "chapter_number": 3, "chapter_title_zh": "连接与会话", "chapter_title_en": "Connections & Sessions", "description": "当前会话与隔离级别",
-          "queries": [
-            { "key": "h2_sessions", "sql": "SELECT SESSION_ID, USER_NAME, SESSION_STATE, ISOLATION_LEVEL, SESSION_START FROM INFORMATION_SCHEMA.SESSIONS ORDER BY SESSION_ID", "desc_zh": "当前会话明细", "desc_en": "Current session details" },
-            { "key": "h2_session_count", "sql": "SELECT COUNT(*) AS SESSION_CNT FROM INFORMATION_SCHEMA.SESSIONS", "desc_zh": "会话总数", "desc_en": "Total session count" }
-          ] },
-        { "chapter_number": 4, "chapter_title_zh": "锁与阻塞", "chapter_title_en": "Locks & Blocking", "description": "表级锁与阻塞情况",
-          "queries": [
-            { "key": "h2_locks", "sql": "SELECT TABLE_SCHEMA, TABLE_NAME, SESSION_ID, LOCK_TYPE FROM INFORMATION_SCHEMA.LOCKS", "desc_zh": "当前持有的锁", "desc_en": "Currently held locks" },
-            { "key": "h2_lock_count", "sql": "SELECT COUNT(*) AS LOCK_CNT FROM INFORMATION_SCHEMA.LOCKS", "desc_zh": "锁总数（空闲库应为 0）", "desc_en": "Total lock count" }
-          ] },
-        { "chapter_number": 5, "chapter_title_zh": "安全与权限", "chapter_title_en": "Security & Privileges", "description": "用户、角色与授权",
-          "queries": [
-            { "key": "h2_users", "sql": "SELECT USER_NAME, IS_ADMIN FROM INFORMATION_SCHEMA.USERS ORDER BY USER_NAME", "desc_zh": "用户清单与管理员标记", "desc_en": "User list with admin flag" },
-            { "key": "h2_roles", "sql": "SELECT ROLE_NAME, REMARKS FROM INFORMATION_SCHEMA.ROLES ORDER BY ROLE_NAME", "desc_zh": "角色清单", "desc_en": "Role list" },
-            { "key": "h2_rights", "sql": "SELECT GRANTEE, GRANTEETYPE, GRANTEDROLE, RIGHTS, TABLE_NAME FROM INFORMATION_SCHEMA.RIGHTS", "desc_zh": "显式授权记录（空库为空，属正常）", "desc_en": "Explicit grants" }
-          ] },
-        { "chapter_number": 6, "chapter_title_zh": "运行参数", "chapter_title_en": "Runtime Settings", "description": "引擎级设置项",
-          "queries": [
-            { "key": "h2_key_settings", "sql": "SELECT SETTING_NAME, SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME IN ('MODE','DB_CLOSE_DELAY','DEFAULT_LOCK_TIMEOUT','MAX_QUERY_TIMEOUT','QUERY_TIMEOUT','LOB_TIMEOUT','WRITE_DELAY','RETENTION_TIME','QUERY_CACHE_SIZE') ORDER BY SETTING_NAME", "desc_zh": "关键设置项", "desc_en": "Key settings" },
-            { "key": "h2_optimizer_flags", "sql": "SELECT SETTING_NAME, SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS WHERE SETTING_NAME LIKE 'OPTIMIZE%' ORDER BY SETTING_NAME", "desc_zh": "优化器开关", "desc_en": "Optimizer flags" },
-            { "key": "h2_all_settings", "sql": "SELECT SETTING_NAME, SETTING_VALUE FROM INFORMATION_SCHEMA.SETTINGS ORDER BY SETTING_NAME", "desc_zh": "全部设置项（约 60 余项）", "desc_en": "All settings" }
-          ] },
-        { "chapter_number": 7, "chapter_title_zh": "SQL 引擎自检", "chapter_title_en": "SQL Engine Self-Check", "description": "用只读 SQL 验证引擎的算术、字符串、递归与聚合能力",
-          "queries": [
-            { "key": "h2_arith", "sql": "SELECT 1 AS ONE, 2+2 AS FOUR, MOD(10,3) AS MOD_RESULT, ABS(-5) AS ABS_RESULT", "desc_zh": "算术与内置函数", "desc_en": "Arithmetic and built-in functions" },
-            { "key": "h2_string_fn", "sql": "SELECT UPPER('dbnav') AS UP, LOWER('DBNAV') AS LOW, LENGTH('dbnav') AS LEN, CONCAT('db','nav') AS CAT", "desc_zh": "字符串函数", "desc_en": "String functions" },
-            { "key": "h2_unicode", "sql": "SELECT '纳管平台自检' AS CN, LENGTH('纳管平台自检') AS CHAR_LEN", "desc_zh": "中文编码与字符长度", "desc_en": "CJK encoding and char length" },
-            { "key": "h2_cte_recursive", "sql": "WITH RECURSIVE T(N) AS (SELECT 1 UNION ALL SELECT N+1 FROM T WHERE N < 5) SELECT N FROM T ORDER BY N", "desc_zh": "递归 CTE", "desc_en": "Recursive CTE" },
-            { "key": "h2_agg", "sql": "SELECT COUNT(*) AS CNT, SUM(N) AS SUM_N, MAX(N) AS MAX_N FROM (SELECT 1 AS N UNION ALL SELECT 2 UNION ALL SELECT 3)", "desc_zh": "聚合函数", "desc_en": "Aggregate functions" },
-            { "key": "h2_join", "sql": "SELECT A.ID, A.NAME, B.SCORE FROM (SELECT 1 AS ID, 'a' AS NAME UNION ALL SELECT 2, 'b') A LEFT JOIN (SELECT 1 AS ID, 90 AS SCORE) B ON A.ID = B.ID ORDER BY A.ID", "desc_zh": "连接与 NULL 处理", "desc_en": "Join and NULL handling" }
-          ] },
-        { "chapter_number": 8, "chapter_title_zh": "自检汇总", "chapter_title_en": "Self-Check Summary", "description": "把前几章的关键计数收敛成一行，便于快速比对",
-          "queries": [
-            { "key": "h2_selfcheck_summary", "sql": "SELECT (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES) AS TABLES, (SELECT COUNT(*) FROM INFORMATION_SCHEMA.SESSIONS) AS SESSIONS, (SELECT COUNT(*) FROM INFORMATION_SCHEMA.LOCKS) AS LOCKS, (SELECT COUNT(*) FROM INFORMATION_SCHEMA.USERS) AS USERS, H2VERSION() AS VERSION", "desc_zh": "关键计数与版本一行汇总", "desc_en": "One-line key counts and version" },
-            { "key": "h2_is_coverage", "sql": "SELECT COUNT(*) AS IS_OBJECTS FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='INFORMATION_SCHEMA'", "desc_zh": "元数据视图可读性检查", "desc_en": "Metadata view readability check" }
-          ] }
+        {
+          "chapter_number": 1,
+          "chapter_title_zh": "健康状态概览",
+          "chapter_title_en": "Health Overview",
+          "description": "版本、构建号与运行模式",
+          "rule_keys": [
+            "h2_version",
+            "h2_build_info",
+            "h2_db_mode",
+            "h2_runtime"
+          ]
+        },
+        {
+          "chapter_number": 2,
+          "chapter_title_zh": "数据库对象清单",
+          "chapter_title_en": "Object Inventory",
+          "description": "表、索引、序列、约束的数量与明细",
+          "rule_keys": [
+            "h2_tables_by_schema",
+            "h2_object_summary",
+            "h2_sequences",
+            "h2_indexes"
+          ]
+        },
+        {
+          "chapter_number": 3,
+          "chapter_title_zh": "连接与会话",
+          "chapter_title_en": "Connections & Sessions",
+          "description": "当前会话与隔离级别",
+          "rule_keys": [
+            "h2_sessions",
+            "h2_session_count"
+          ]
+        },
+        {
+          "chapter_number": 4,
+          "chapter_title_zh": "锁与阻塞",
+          "chapter_title_en": "Locks & Blocking",
+          "description": "表级锁与阻塞情况",
+          "rule_keys": [
+            "h2_locks",
+            "h2_lock_count"
+          ]
+        },
+        {
+          "chapter_number": 5,
+          "chapter_title_zh": "安全与权限",
+          "chapter_title_en": "Security & Privileges",
+          "description": "用户、角色与授权",
+          "rule_keys": [
+            "h2_users",
+            "h2_roles",
+            "h2_rights"
+          ]
+        },
+        {
+          "chapter_number": 6,
+          "chapter_title_zh": "运行参数",
+          "chapter_title_en": "Runtime Settings",
+          "description": "引擎级设置项",
+          "rule_keys": [
+            "h2_key_settings",
+            "h2_optimizer_flags",
+            "h2_all_settings"
+          ]
+        },
+        {
+          "chapter_number": 7,
+          "chapter_title_zh": "SQL 引擎自检",
+          "chapter_title_en": "SQL Engine Self-Check",
+          "description": "用只读 SQL 验证引擎的算术、字符串、递归与聚合能力",
+          "rule_keys": [
+            "h2_arith",
+            "h2_string_fn",
+            "h2_unicode",
+            "h2_cte_recursive",
+            "h2_agg",
+            "h2_join"
+          ]
+        },
+        {
+          "chapter_number": 8,
+          "chapter_title_zh": "自检汇总",
+          "chapter_title_en": "Self-Check Summary",
+          "description": "把前几章的关键计数收敛成一行，便于快速比对",
+          "rule_keys": [
+            "h2_selfcheck_summary",
+            "h2_is_coverage"
+          ]
+        }
       ]
     }
   ]

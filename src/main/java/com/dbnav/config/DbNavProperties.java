@@ -26,8 +26,11 @@ public class DbNavProperties {
     /** Database types JSON resource path */
     private String dbTypesConfig = "classpath:db-types.json";
 
-    /** 巡检模板种子（默认章节与查询） */
+    /** 巡检模板种子（报告骨架：模板 → 章节 → 引用哪些规则） */
     private String inspectionTemplates = "classpath:inspection/templates.json";
+
+    /** 巡检规则库种子（规则正文，跨模板共享） */
+    private String inspectionRules = "classpath:inspection/rules.json";
 
     /** 配置基线种子（内置默认阈值） */
     private String inspectionBaselines = "classpath:inspection/baselines.json";

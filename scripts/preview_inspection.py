@@ -4,10 +4,11 @@
 巡检配置与执行预览实现（对齐 Java 侧 InspectionConfigService / BaselineChecker / InspectionRunner）。
 
 本模块被 devserver.py 调用，用 SQLite 复刻巡检模型：
-    模板 → 章节 → 规则（两级 ON DELETE CASCADE）
-    配置基线（独立表）
-    修改留痕（独立表）
-    执行记录 → 规则结果 / 基线判定（两级 ON DELETE CASCADE）
+    巡检配置管理  模板 → 章节（两级 ON DELETE CASCADE）
+    规则引擎      规则库（规则的唯一存放处）+ 章节绑定（多对多，可跨模板复用）
+    基线配置管理  配置基线（按库类型独立维护）
+    修改留痕      独立表
+    执行记录      执行记录 → 规则结果 / 基线判定（两级 ON DELETE CASCADE）
 
 对外只暴露四个函数：
     init_schema(conn)                建表
@@ -71,19 +72,30 @@ CREATE TABLE IF NOT EXISTS inspection_chapter (
     UNIQUE (template_id, chapter_number)
 );
 
-CREATE TABLE IF NOT EXISTS inspection_query (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    chapter_id            INTEGER NOT NULL,
-    query_key             TEXT NOT NULL,
-    query_sql             TEXT,
-    query_description_zh  TEXT,
-    query_description_en  TEXT,
-    enabled               INTEGER DEFAULT 1,
-    sort_order            INTEGER DEFAULT 0,
-    created_at            TEXT DEFAULT (datetime('now','localtime')),
-    updated_at            TEXT DEFAULT (datetime('now','localtime')),
+CREATE TABLE IF NOT EXISTS inspection_rule (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_key      TEXT NOT NULL,
+    db_type       TEXT NOT NULL,
+    rule_name_zh  TEXT NOT NULL,
+    rule_name_en  TEXT,
+    rule_sql      TEXT,
+    category      TEXT,
+    enabled       INTEGER DEFAULT 1,
+    source        TEXT DEFAULT 'PRESET',
+    created_at    TEXT DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT DEFAULT (datetime('now','localtime')),
+    UNIQUE (rule_key)
+);
+
+CREATE TABLE IF NOT EXISTS inspection_chapter_rule (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    chapter_id  INTEGER NOT NULL,
+    rule_id     INTEGER NOT NULL,
+    sort_order  INTEGER DEFAULT 0,
+    created_at  TEXT DEFAULT (datetime('now','localtime')),
     FOREIGN KEY (chapter_id) REFERENCES inspection_chapter(id) ON DELETE CASCADE,
-    UNIQUE (chapter_id, query_key)
+    FOREIGN KEY (rule_id)    REFERENCES inspection_rule(id)    ON DELETE CASCADE,
+    UNIQUE (chapter_id, rule_id)
 );
 
 CREATE TABLE IF NOT EXISTS inspection_baseline (
@@ -198,21 +210,108 @@ def init_schema(conn):
 # ---------------------------------------------------------------------------
 
 def seed(conn, res_dir):
-    """表为空时导入模板与基线。返回统计字典。"""
-    stat = {"templatesLoaded": 0, "chaptersLoaded": 0,
-            "queriesLoaded": 0, "baselinesLoaded": 0}
+    """各表为空时分别导入规则库、模板与章节、基线。返回统计字典。
 
-    if conn.execute("SELECT COUNT(*) FROM inspection_template").fetchone()[0] == 0:
-        stat["templatesLoaded"] = _seed_templates(conn, res_dir)
+    与 Java 侧 seedIfEmpty() 的编排保持一致：
+      inspection_rule      空 → 从 rules.json 导入规则库
+      inspection_template  空 → 从 templates.json 导入模板与章节，并按 rule_keys 建绑定
+      两者都在、绑定为空    → 只重建「章节引用了哪些规则」，不动已有模板与章节
+    """
+    stat = {"templatesImported": 0, "rulesImported": 0,
+            "bindingsImported": 0, "baselinesImported": 0}
+
+    rules_empty = conn.execute("SELECT COUNT(*) FROM inspection_rule").fetchone()[0] == 0
+    tpl_empty = conn.execute("SELECT COUNT(*) FROM inspection_template").fetchone()[0] == 0
+    bind_empty = conn.execute("SELECT COUNT(*) FROM inspection_chapter_rule").fetchone()[0] == 0
+
+    # 顺序不能反：先有规则库，模板的 rule_keys 才有东西可指
+    if rules_empty:
+        stat["rulesImported"] = _seed_rules(conn, res_dir)
+    if tpl_empty:
+        stat["templatesImported"] = _seed_templates(conn, res_dir)
+    elif bind_empty:
+        stat["bindingsImported"] = _rebuild_bindings(conn, res_dir)
 
     if conn.execute("SELECT COUNT(*) FROM inspection_baseline").fetchone()[0] == 0:
-        stat["baselinesLoaded"] = _seed_baselines(conn, res_dir)
+        stat["baselinesImported"] = _seed_baselines(conn, res_dir)
 
-    stat["chaptersLoaded"] = conn.execute(
+    _drop_legacy_query_table(conn)
+
+    # Total 是「现在库里有多少」，与上面的 Imported 分开报
+    stat["templatesTotal"] = conn.execute(
+        "SELECT COUNT(*) FROM inspection_template").fetchone()[0]
+    stat["chaptersTotal"] = conn.execute(
         "SELECT COUNT(*) FROM inspection_chapter").fetchone()[0]
-    stat["queriesLoaded"] = conn.execute(
-        "SELECT COUNT(*) FROM inspection_query").fetchone()[0]
+    stat["rulesTotal"] = conn.execute(
+        "SELECT COUNT(*) FROM inspection_rule").fetchone()[0]
+    stat["bindingsTotal"] = conn.execute(
+        "SELECT COUNT(*) FROM inspection_chapter_rule").fetchone()[0]
+    stat["baselinesTotal"] = conn.execute(
+        "SELECT COUNT(*) FROM inspection_baseline").fetchone()[0]
     return stat
+
+
+def _drop_legacy_query_table(conn):
+    """删掉旧版内嵌在章节下的规则表 inspection_query。
+
+    规则正文现在只存放在 inspection_rule，这张表已无人读写。它只存在于从旧
+    schema 升级上来的库里（新库根本不会建它），所以先探测再删，正常路径直接返回。
+
+    注意别删错：inspection_run_query 是**执行快照**表（每次巡检把当时跑的 SQL
+    连同结果存一份，事后改规则库不该改写历史报告），与这张配置表不是一回事。
+    """
+    try:
+        conn.execute("SELECT COUNT(*) FROM inspection_query").fetchone()
+    except sqlite3.OperationalError:
+        return          # 新库没有这张表，正常路径
+    conn.execute("DROP TABLE inspection_query")
+
+
+def _seed_rules(conn, res_dir):
+    path = os.path.join(res_dir, "inspection", "rules.json")
+    if not os.path.isfile(path):
+        return 0
+    with open(path, encoding="utf-8") as f:
+        rules = json.load(f).get("rules", [])
+
+    count = 0
+    for r in rules:
+        try:
+            conn.execute(
+                """INSERT INTO inspection_rule
+                   (rule_key, db_type, rule_name_zh, rule_name_en, rule_sql,
+                    category, enabled, source)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (r["rule_key"], r["db_type"], r["rule_name_zh"], r.get("rule_name_en"),
+                 r.get("rule_sql"), r.get("category"), r.get("enabled", 1),
+                 r.get("source", "PRESET")))
+            count += 1
+        except sqlite3.IntegrityError:
+            pass
+    conn.commit()
+    return count
+
+
+def _bind_rule_keys(conn, chapter_id, rule_keys):
+    """按 rule_key 建绑定；库里查不到的 key 跳过（与 Java 侧一致：不中断导入）。"""
+    if not rule_keys:
+        return 0
+    row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) FROM inspection_chapter_rule "
+                       "WHERE chapter_id=?", (chapter_id,)).fetchone()
+    order = (row[0] if row and row[0] is not None else -1) + 1
+    n = 0
+    for key in rule_keys:
+        hit = conn.execute("SELECT id FROM inspection_rule WHERE rule_key=?", (key,)).fetchone()
+        if not hit:
+            continue
+        try:
+            conn.execute("INSERT INTO inspection_chapter_rule (chapter_id, rule_id, sort_order) "
+                         "VALUES (?,?,?)", (chapter_id, hit[0], order))
+            order += 1
+            n += 1
+        except sqlite3.IntegrityError:
+            pass
+    return n
 
 
 def _seed_templates(conn, res_dir):
@@ -249,16 +348,35 @@ def _seed_templates(conn, res_dir):
             ch_id = conn.execute(
                 "SELECT id FROM inspection_chapter WHERE template_id=? AND chapter_number=?",
                 (tpl_id, c["chapter_number"])).fetchone()[0]
+            _bind_rule_keys(conn, ch_id, c.get("rule_keys"))
 
-            for order, q in enumerate(c.get("queries", [])):
-                conn.execute(
-                    """INSERT INTO inspection_query
-                       (chapter_id, query_key, query_sql, query_description_zh,
-                        query_description_en, enabled, sort_order)
-                       VALUES (?,?,?,?,?,?,?)""",
-                    (ch_id, q["key"], q.get("sql"), q.get("desc_zh"),
-                     q.get("desc_en"), q.get("enabled", 1), order))
+    conn.commit()
+    return count
 
+
+def _rebuild_bindings(conn, res_dir):
+    """模板与章节都在、只是绑定为空时的补建路径（按 db_type + 模板名 + 章节号匹配）。"""
+    path = os.path.join(res_dir, "inspection", "templates.json")
+    if not os.path.isfile(path):
+        return 0
+    with open(path, encoding="utf-8") as f:
+        templates = json.load(f).get("templates", [])
+
+    count = 0
+    for t in templates:
+        hit = conn.execute(
+            "SELECT id FROM inspection_template WHERE db_type=? AND template_name_zh=?",
+            (t["db_type"], t["template_name_zh"])).fetchone()
+        if not hit:
+            continue
+        tpl_id = hit[0]
+        for c in t.get("chapters", []):
+            ch = conn.execute(
+                "SELECT id FROM inspection_chapter WHERE template_id=? AND chapter_number=?",
+                (tpl_id, c["chapter_number"])).fetchone()
+            if not ch:
+                continue
+            count += _bind_rule_keys(conn, ch[0], c.get("rule_keys"))
     conn.commit()
     return count
 
@@ -428,10 +546,6 @@ def _chapters_of(conn, tpl_id, only_enabled=False):
     rows = conn.execute(sql, (tpl_id,)).fetchall()
     out = []
     for c in rows:
-        qsql = "SELECT * FROM inspection_query WHERE chapter_id=?"
-        if only_enabled:
-            qsql += " AND enabled=1"
-        qsql += " ORDER BY sort_order, id"
         out.append({
             "id": c["id"], "templateId": c["template_id"],
             "chapterNumber": c["chapter_number"],
@@ -439,18 +553,57 @@ def _chapters_of(conn, tpl_id, only_enabled=False):
             "chapterTitleEn": c["chapter_title_en"],
             "description": c["description"], "enabled": c["enabled"],
             "sortOrder": c["sort_order"],
-            "queries": [_query(q) for q in conn.execute(qsql, (c["id"],)).fetchall()],
+            "rules": _chapter_rules(conn, c["id"], only_enabled),
         })
     return out
 
 
-def _query(r):
-    return {
-        "id": r["id"], "chapterId": r["chapter_id"], "key": r["query_key"],
-        "sql": r["query_sql"], "desc_zh": r["query_description_zh"],
-        "desc_en": r["query_description_en"],
-        "enabled": r["enabled"], "sortOrder": r["sort_order"],
+def _chapter_rules(conn, chapter_id, only_enabled=False):
+    """某章引用的规则。规则正文来自规则库，排序来自绑定表。"""
+    sql = ("SELECT r.*, cr.sort_order AS bind_order, "
+           "(SELECT COUNT(*) FROM inspection_chapter_rule x WHERE x.rule_id = r.id) AS ref_count "
+           "FROM inspection_chapter_rule cr JOIN inspection_rule r ON r.id = cr.rule_id "
+           "WHERE cr.chapter_id=?")
+    if only_enabled:
+        sql += " AND r.enabled=1"
+    sql += " ORDER BY cr.sort_order, cr.id"
+    rows = conn.execute(sql, (chapter_id,)).fetchall()
+    out = []
+    for r in rows:
+        item = _rule(r)
+        item["sortOrder"] = r["bind_order"]
+        item["usedBy"] = _used_by(conn, r["id"])
+        out.append(item)
+    return out
+
+
+def _rule(r, with_used_by=False, conn=None):
+    item = {
+        "id": r["id"], "ruleKey": r["rule_key"], "dbType": r["db_type"],
+        "ruleNameZh": r["rule_name_zh"], "ruleNameEn": r["rule_name_en"],
+        "ruleSql": r["rule_sql"], "category": r["category"],
+        "enabled": r["enabled"], "source": r["source"],
+        "createdAt": r["created_at"], "updatedAt": r["updated_at"],
+        "sortOrder": None,
+        "refCount": r["ref_count"] if "ref_count" in r.keys() else None,
+        "usedBy": [],
     }
+    if with_used_by and conn is not None:
+        item["usedBy"] = _used_by(conn, r["id"])
+    return item
+
+
+def _used_by(conn, rule_id):
+    rows = conn.execute(
+        "SELECT t.template_name_zh FROM inspection_chapter_rule cr "
+        "JOIN inspection_chapter c ON c.id = cr.chapter_id "
+        "JOIN inspection_template t ON t.id = c.template_id "
+        "WHERE cr.rule_id=? ORDER BY t.template_name_zh", (rule_id,)).fetchall()
+    out = []
+    for r in rows:
+        if r[0] not in out:
+            out.append(r[0])
+    return out
 
 
 def _baseline(r):
@@ -573,28 +726,86 @@ def handle(conn, method, path, qs, body):
                 {"title": row["chapter_title_zh"]})
         return ok(None)
 
-    # ---------------- 规则 ----------------
-    m = re.match(r"^/api/inspection/chapters/(\d+)/queries$", path)
-    if method == "GET" and m:
-        rows = conn.execute(
-            "SELECT * FROM inspection_query WHERE chapter_id=? ORDER BY sort_order, id",
-            (m.group(1),)).fetchall()
-        return ok([_query(r) for r in rows])
-    if method == "POST" and path == "/api/inspection/queries":
-        return _create_query(conn, body, ok, bad)
-    m = re.match(r"^/api/inspection/queries/(\d+)$", path)
-    if m and method == "PUT":
-        return _update_query(conn, int(m.group(1)), body, ok, bad)
-    if m and method == "DELETE":
-        row = conn.execute("SELECT * FROM inspection_query WHERE id=?",
+    # ---------------- 规则引擎：规则库 ----------------
+    if method == "GET" and path == "/api/inspection/rules":
+        return ok(_list_rules(conn, q1("dbType"), q1("category"),
+                              q1("enabled"), q1("keyword")))
+
+    if method == "GET" and path == "/api/inspection/rules/stats":
+        return ok(_rule_stats(conn))
+
+    if method == "GET" and path == "/api/inspection/rules/categories":
+        db_type = q1("dbType")
+        if db_type:
+            rows = conn.execute(
+                "SELECT DISTINCT category FROM inspection_rule "
+                "WHERE category IS NOT NULL AND db_type=? ORDER BY category",
+                (db_type,)).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT DISTINCT category FROM inspection_rule "
+                "WHERE category IS NOT NULL ORDER BY category").fetchall()
+        return ok([r[0] for r in rows])
+
+    if method == "POST" and path == "/api/inspection/rules":
+        return _create_rule(conn, body, ok, bad)
+
+    if method == "POST" and path == "/api/inspection/rules/enabled":
+        db_type = q1("dbType")
+        enabled = q1("enabled", "true").lower() == "true"
+        cur = conn.execute(
+            "UPDATE inspection_rule SET enabled=?, updated_at=datetime('now','localtime') "
+            "WHERE db_type=?", (1 if enabled else 0, db_type))
+        conn.commit()
+        _record(conn, "inspection_rule", 0, "UPDATE",
+                None, {"dbType": db_type, "bulkEnabled": enabled, "affected": cur.rowcount})
+        return ok({"dbType": db_type, "enabled": enabled, "affected": cur.rowcount})
+
+    m = re.match(r"^/api/inspection/rules/(\d+)/enabled$", path)
+    if m and method == "POST":
+        enabled = q1("enabled", "true").lower() == "true"
+        row = conn.execute("SELECT * FROM inspection_rule WHERE id=?",
                            (m.group(1),)).fetchone()
         if not row:
             return bad(404, "规则不存在")
-        conn.execute("DELETE FROM inspection_query WHERE id=?", (m.group(1),))
+        conn.execute("UPDATE inspection_rule SET enabled=?, "
+                     "updated_at=datetime('now','localtime') WHERE id=?",
+                     (1 if enabled else 0, m.group(1)))
         conn.commit()
-        _record(conn, "inspection_query", int(m.group(1)), "DELETE",
-                {"key": row["query_key"]})
-        return ok(None)
+        _record(conn, "inspection_rule", int(m.group(1)), "UPDATE",
+                {"key": row["rule_key"], "enabled": row["enabled"]},
+                {"key": row["rule_key"], "enabled": 1 if enabled else 0})
+        return ok(_rule(_fetch_rule(conn, int(m.group(1))), True, conn))
+
+    m = re.match(r"^/api/inspection/rules/(\d+)/test$", path)
+    if m and method == "POST":
+        return _test_rule_stub(conn, int(m.group(1)), body, ok, bad)
+
+    m = re.match(r"^/api/inspection/rules/(\d+)$", path)
+    if m and method == "GET":
+        row = _fetch_rule(conn, int(m.group(1)))
+        return ok(_rule(row, True, conn)) if row else bad(404, "规则不存在")
+    if m and method == "PUT":
+        return _update_rule(conn, int(m.group(1)), body, ok, bad)
+    if m and method == "DELETE":
+        return _delete_rule(conn, int(m.group(1)), q1("force", "false"), ok, bad)
+
+    # ---------------- 规则引擎：章节 ↔ 规则 绑定 ----------------
+    m = re.match(r"^/api/inspection/chapters/(\d+)/rules$", path)
+    if method == "GET" and m:
+        return ok(_chapter_rules(conn, int(m.group(1))))
+
+    m = re.match(r"^/api/inspection/chapters/(\d+)/rules/order$", path)
+    if m and method == "PUT":
+        return _reorder_chapter_rules(conn, int(m.group(1)), body, ok, bad)
+
+    m = re.match(r"^/api/inspection/chapters/(\d+)/rules/(\d+)$", path)
+    if m and method == "DELETE":
+        return _unbind_rule(conn, int(m.group(1)), int(m.group(2)), ok, bad)
+
+    m = re.match(r"^/api/inspection/chapters/(\d+)/rules$", path)
+    if m and method == "POST":
+        return _bind_rule(conn, int(m.group(1)), body, ok, bad)
 
     # ---------------- 基线 ----------------
     if method == "GET" and path == "/api/inspection/baselines":
@@ -709,22 +920,34 @@ def handle(conn, method, path, qs, body):
 # ---------------------------------------------------------------------------
 
 def _summary(conn):
+    # 规则数与引用数是两个不同的口径：一条规则被 3 个章节引用算 3 条引用、1 条规则。
+    # 两个都报，免得把「跨模板共享」误读成「规则重复」。
+    rules_by_type = {r["db_type"]: r["c"] for r in conn.execute(
+        "SELECT db_type, COUNT(*) c FROM inspection_rule GROUP BY db_type ORDER BY db_type")}
+    binds_by_type = {r["db_type"]: r["c"] for r in conn.execute(
+        "SELECT t.db_type, COUNT(*) c FROM inspection_chapter_rule cr "
+        "JOIN inspection_chapter c ON c.id = cr.chapter_id "
+        "JOIN inspection_template t ON t.id = c.template_id "
+        "GROUP BY t.db_type ORDER BY t.db_type")}
+
     by_type = {}
-    total_ch, total_q = 0, 0
+    total_ch = 0
     for t in conn.execute("SELECT * FROM inspection_template ORDER BY db_type").fetchall():
         agg = by_type.setdefault(t["db_type"], {
-            "dbType": t["db_type"], "templates": 0, "chapters": 0, "queries": 0})
+            "dbType": t["db_type"], "templates": 0, "chapters": 0,
+            "rules": 0, "bindings": 0})
         agg["templates"] += 1
         chs = conn.execute(
             "SELECT id FROM inspection_chapter WHERE template_id=?", (t["id"],)).fetchall()
         agg["chapters"] += len(chs)
         total_ch += len(chs)
-        for c in chs:
-            n = conn.execute(
-                "SELECT COUNT(*) FROM inspection_query WHERE chapter_id=?",
-                (c["id"],)).fetchone()[0]
-            agg["queries"] += n
-            total_q += n
+
+    total_rules, total_bindings = 0, 0
+    for db_type, agg in by_type.items():
+        agg["rules"] = rules_by_type.get(db_type, 0)
+        agg["bindings"] = binds_by_type.get(db_type, 0)
+        total_rules += agg["rules"]
+        total_bindings += agg["bindings"]
 
     risk = {}
     for r in conn.execute(
@@ -739,7 +962,9 @@ def _summary(conn):
             "SELECT COUNT(*) FROM inspection_template").fetchone()[0],
         "byDbType": list(by_type.values()),
         "totalChapters": total_ch,
-        "totalQueries": total_q,
+        "totalRules": total_rules,
+        "totalBindings": total_bindings,
+        "ruleCountByType": rules_by_type,
         "baselineCountByType": counts,
         "baselineRiskDistribution": risk,
     }
@@ -849,7 +1074,12 @@ def _create_chapter(conn, body, ok, bad):
                "chapterTitleZh": row["chapter_title_zh"],
                "chapterTitleEn": row["chapter_title_en"],
                "description": row["description"], "enabled": row["enabled"],
-               "sortOrder": row["sort_order"], "queries": []})
+               "sortOrder": row["sort_order"],
+               # 新建章节时还没有绑定任何规则；rules 由树接口回填，
+               # 这里与 Java 侧一致地给 null（不是空数组），避免两侧形状不同。
+               # 不带 ruleKeys：那是种子文件专用的字段，Java 侧标了 WRITE_ONLY，
+               # 接口响应里不会出现。
+               "rules": None})
 
 
 def _update_chapter(conn, cid, body, ok, bad):
@@ -879,50 +1109,238 @@ def _update_chapter(conn, cid, body, ok, bad):
                "sortOrder": r["sort_order"]})
 
 
-def _create_query(conn, body, ok, bad):
-    cid = body.get("chapterId")
-    if not cid:
-        return bad(400, "chapterId 不能为空")
-    key = body.get("key")
-    sql = body.get("sql")
-    if not key or not sql:
-        return bad(400, "规则 key 与 SQL 不能为空")
+def _fetch_rule(conn, rule_id):
+    return conn.execute(
+        "SELECT r.*, (SELECT COUNT(*) FROM inspection_chapter_rule cr "
+        "WHERE cr.rule_id = r.id) AS ref_count FROM inspection_rule r WHERE r.id=?",
+        (rule_id,)).fetchone()
+
+
+def _fetch_rule_by_key(conn, key):
+    return conn.execute(
+        "SELECT r.*, (SELECT COUNT(*) FROM inspection_chapter_rule cr "
+        "WHERE cr.rule_id = r.id) AS ref_count FROM inspection_rule r WHERE r.rule_key=?",
+        (key,)).fetchone()
+
+
+def _list_rules(conn, db_type, category, enabled, keyword):
+    sql = ("SELECT r.*, (SELECT COUNT(*) FROM inspection_chapter_rule cr "
+           "WHERE cr.rule_id = r.id) AS ref_count FROM inspection_rule r WHERE 1=1")
+    args = []
+    if db_type:
+        sql += " AND r.db_type=?"
+        args.append(db_type)
+    if category:
+        sql += " AND r.category=?"
+        args.append(category)
+    if enabled not in (None, ""):
+        sql += " AND r.enabled=?"
+        args.append(1 if str(enabled).lower() == "true" else 0)
+    if keyword:
+        kw = "%" + keyword.lower() + "%"
+        sql += (" AND (LOWER(r.rule_key) LIKE ? OR LOWER(r.rule_name_zh) LIKE ? "
+                "OR LOWER(r.rule_sql) LIKE ?)")
+        args += [kw, kw, kw]
+    sql += " ORDER BY r.db_type, r.category, r.rule_key"
+    return [_rule(r, True, conn) for r in conn.execute(sql, args).fetchall()]
+
+
+def _rule_stats(conn):
+    def one(sql, *a):
+        return conn.execute(sql, a).fetchone()[0]
+
+    by_type = {}
+    for row in conn.execute("SELECT db_type, COUNT(*) FROM inspection_rule "
+                            "GROUP BY db_type ORDER BY db_type"):
+        by_type[row[0]] = row[1]
+
+    by_cat = {}
+    for row in conn.execute("SELECT COALESCE(category,'(未归类)'), COUNT(*) "
+                            "FROM inspection_rule GROUP BY 1 ORDER BY 2 DESC, 1"):
+        by_cat[row[0]] = row[1]
+
+    return {
+        "total": one("SELECT COUNT(*) FROM inspection_rule"),
+        "enabled": one("SELECT COUNT(*) FROM inspection_rule WHERE enabled=1"),
+        "disabled": one("SELECT COUNT(*) FROM inspection_rule WHERE enabled=0"),
+        "unbound": one("SELECT COUNT(*) FROM inspection_rule r WHERE NOT EXISTS "
+                       "(SELECT 1 FROM inspection_chapter_rule cr WHERE cr.rule_id = r.id)"),
+        "byDbType": by_type,
+        "byCategory": by_cat,
+    }
+
+
+def _validate_rule(body):
+    if not body.get("ruleKey"):
+        return "规则 key 不能为空"
+    if not body.get("dbType"):
+        return "db_type 不能为空"
+    if not body.get("ruleNameZh"):
+        return "规则名称不能为空"
+    if not body.get("ruleSql"):
+        return "规则 SQL 不能为空"
+    return None
+
+
+def _create_rule(conn, body, ok, bad):
+    err = _validate_rule(body)
+    if err:
+        return bad(400, err)
+    key = body.get("ruleKey")
     try:
         conn.execute(
-            """INSERT INTO inspection_query
-               (chapter_id, query_key, query_sql, query_description_zh,
-                query_description_en, enabled, sort_order)
-               VALUES (?,?,?,?,?,?,?)""",
-            (cid, key, sql, body.get("desc_zh"), body.get("desc_en"),
-             body.get("enabled", 1), body.get("sortOrder", 0)))
+            """INSERT INTO inspection_rule
+               (rule_key, db_type, rule_name_zh, rule_name_en, rule_sql,
+                category, enabled, source)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (key, body.get("dbType"), body.get("ruleNameZh"), body.get("ruleNameEn"),
+             body.get("ruleSql"), body.get("category"),
+             body.get("enabled", 1), body.get("source") or "CUSTOM"))
         conn.commit()
     except sqlite3.IntegrityError:
-        return bad(400, f"该章节下规则 key 已存在：{key}")
-    r = conn.execute("SELECT * FROM inspection_query WHERE chapter_id=? AND query_key=?",
-                     (cid, key)).fetchone()
-    _record(conn, "inspection_query", r["id"], "INSERT", None, {"key": key})
-    return ok(_query(r))
+        return bad(400, f"规则 key 已存在：{key}")
+    row = _fetch_rule_by_key(conn, key)
+    _record(conn, "inspection_rule", row["id"], "INSERT", None,
+            {"key": key, "dbType": row["db_type"]})
+    return ok(_rule(row, True, conn))
 
 
-def _update_query(conn, qid, body, ok, bad):
-    row = conn.execute("SELECT * FROM inspection_query WHERE id=?", (qid,)).fetchone()
+def _update_rule(conn, rid, body, ok, bad):
+    row = _fetch_rule(conn, rid)
     if not row:
         return bad(404, "规则不存在")
-    conn.execute(
-        """UPDATE inspection_query SET query_sql=?, query_description_zh=?,
-           query_description_en=?, enabled=?, sort_order=?,
-           updated_at=datetime('now','localtime') WHERE id=?""",
-        (body.get("sql") or row["query_sql"],
-         body.get("desc_zh") or row["query_description_zh"],
-         body.get("desc_en") or row["query_description_en"],
-         body.get("enabled") if body.get("enabled") is not None else row["enabled"],
-         body.get("sortOrder") if body.get("sortOrder") is not None else row["sort_order"],
-         qid))
+
+    # 预置规则的 key 与库类型不允许改：改了等于换了一条规则，引用它的章节会莫名其妙
+    preset = (row["source"] or "").upper() == "PRESET"
+    key = row["rule_key"] if (preset or not body.get("ruleKey")) else body["ruleKey"]
+    db_type = row["db_type"] if (preset or not body.get("dbType")) else body["dbType"]
+    name = body.get("ruleNameZh") or row["rule_name_zh"]
+    sql = body.get("ruleSql") or row["rule_sql"]
+
+    if not sql:
+        return bad(400, "规则 SQL 不能为空")
+    if not name:
+        return bad(400, "规则名称不能为空")
+
+    try:
+        conn.execute(
+            """UPDATE inspection_rule SET rule_key=?, db_type=?, rule_name_zh=?,
+               rule_name_en=?, rule_sql=?, category=?, enabled=?,
+               updated_at=datetime('now','localtime') WHERE id=?""",
+            (key, db_type, name,
+             body.get("ruleNameEn") if body.get("ruleNameEn") is not None else row["rule_name_en"],
+             sql,
+             body.get("category") if body.get("category") is not None else row["category"],
+             body.get("enabled") if body.get("enabled") is not None else row["enabled"],
+             rid))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        return bad(400, f"规则 key 已存在：{key}")
+
+    refs = conn.execute("SELECT COUNT(*) FROM inspection_chapter_rule WHERE rule_id=?",
+                        (rid,)).fetchone()[0]
+    _record(conn, "inspection_rule", rid, "UPDATE",
+            {"key": row["rule_key"], "enabled": row["enabled"]},
+            {"key": key,
+             "enabled": body.get("enabled") if body.get("enabled") is not None else row["enabled"],
+             "refs": refs})
+    return ok(_rule(_fetch_rule(conn, rid), True, conn))
+
+
+def _delete_rule(conn, rid, force, ok, bad):
+    row = _fetch_rule(conn, rid)
+    if not row:
+        return bad(404, "规则不存在")
+
+    used = _used_by(conn, rid)
+    if used and str(force).lower() != "true":
+        return bad(400, f"该规则正被 {len(used)} 个章节引用（{'、'.join(used)}），"
+                        f"删除会影响这些模板的报告。如确认删除请传 force=true")
+
+    conn.execute("DELETE FROM inspection_rule WHERE id=?", (rid,))
     conn.commit()
-    _record(conn, "inspection_query", qid, "UPDATE",
-            {"key": row["query_key"]}, {"key": row["query_key"]})
-    return ok(_query(conn.execute("SELECT * FROM inspection_query WHERE id=?",
-                                  (qid,)).fetchone()))
+    _record(conn, "inspection_rule", rid, "DELETE",
+            {"key": row["rule_key"], "usedBy": ",".join(used)})
+    return ok(None)
+
+
+# ---------------- 章节 ↔ 规则 绑定 ----------------
+
+def _bind_rule(conn, chapter_id, body, ok, bad):
+    rid = body.get("ruleId")
+    if not rid:
+        return bad(400, "ruleId 不能为空")
+    ch = conn.execute("SELECT id FROM inspection_chapter WHERE id=?", (chapter_id,)).fetchone()
+    if not ch:
+        return bad(400, f"章节不存在: {chapter_id}")
+    rule = conn.execute("SELECT * FROM inspection_rule WHERE id=?", (rid,)).fetchone()
+    if not rule:
+        return bad(400, f"规则不存在: {rid}")
+
+    if body.get("sortOrder") is not None:
+        order = body["sortOrder"]
+    else:
+        row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) FROM inspection_chapter_rule "
+                           "WHERE chapter_id=?", (chapter_id,)).fetchone()
+        order = (row[0] if row and row[0] is not None else -1) + 1
+    try:
+        conn.execute("INSERT INTO inspection_chapter_rule (chapter_id, rule_id, sort_order) "
+                     "VALUES (?,?,?)", (chapter_id, rid, order))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        return bad(400, f"该章节已引用规则：{rule['rule_key']}")
+    _record(conn, "inspection_chapter_rule", chapter_id, "INSERT", None,
+            {"chapterId": chapter_id, "rule": rule["rule_key"], "sortOrder": order})
+    return ok(None)
+
+
+def _unbind_rule(conn, chapter_id, rule_id, ok, bad):
+    rule = conn.execute("SELECT * FROM inspection_rule WHERE id=?", (rule_id,)).fetchone()
+    cur = conn.execute("DELETE FROM inspection_chapter_rule WHERE chapter_id=? AND rule_id=?",
+                       (chapter_id, rule_id))
+    if cur.rowcount == 0:
+        return bad(400, "该章节未引用此规则")
+    conn.commit()
+    _record(conn, "inspection_chapter_rule", chapter_id, "DELETE",
+            {"chapterId": chapter_id,
+             "rule": rule["rule_key"] if rule else str(rule_id)})
+    return ok(None)
+
+
+def _reorder_chapter_rules(conn, chapter_id, body, ok, bad):
+    ids = body.get("ruleIds")
+    if not isinstance(ids, list):
+        return bad(400, "ruleIds 必须是数组")
+    n = 0
+    for order, rid in enumerate(ids):
+        cur = conn.execute("UPDATE inspection_chapter_rule SET sort_order=? "
+                           "WHERE chapter_id=? AND rule_id=?", (order, chapter_id, rid))
+        n += cur.rowcount
+    conn.commit()
+    _record(conn, "inspection_chapter_rule", chapter_id, "UPDATE", None,
+            {"chapterId": chapter_id, "reordered": n})
+    return ok({"chapterId": chapter_id, "reordered": n})
+
+
+_TEST_UNAVAILABLE = (
+    "预览服务不具备数据库连接能力，无法试跑规则。"
+    "请启动 Java 后端（JDK 17 + Maven）以获得真实的规则试跑结果。"
+)
+
+
+def _test_rule_stub(conn, rid, body, ok, bad):
+    """
+    规则试跑在预览服务下恒定返回 501。
+
+    与报告导出同一条原则：试跑的意义就是拿真实数据库撞一次，这里没有 JDBC 层，
+    伪造一份「看起来跑通了」的列名与结果比明确的 501 危险得多。
+    校验顺序与 Java 侧一致：先 404（规则不存在），再 400（缺 dataSourceId），最后 501。
+    """
+    if not _fetch_rule(conn, rid):
+        return bad(404, "规则不存在")
+    if not body or body.get("dataSourceId") is None:
+        return bad(400, "dataSourceId 不能为空")
+    return (501, {"code": 501, "message": _TEST_UNAVAILABLE, "data": None})
 
 
 def _create_baseline(conn, body, ok, bad):
@@ -1204,7 +1622,8 @@ def _run_inspection(conn, body, ok, bad):
     started = datetime.now().isoformat(timespec="seconds")
     t0 = time.time()
 
-    # ---- 规则：按章节号 → sort_order 顺序逐条列出 ----
+    # ---- 规则：按章节号 → 绑定 sort_order 顺序逐条列出 ----
+    # 规则正文来自规则库（inspection_rule），章节只是通过绑定表引用它
     rule_rows = []
     for ch in conn.execute(
             "SELECT * FROM inspection_chapter WHERE template_id=? "
@@ -1213,18 +1632,20 @@ def _run_inspection(conn, body, ok, bad):
             continue
         chapter_enabled = ch["enabled"] != 0
         for q in conn.execute(
-                "SELECT * FROM inspection_query WHERE chapter_id=? ORDER BY sort_order, id",
+                "SELECT r.* FROM inspection_chapter_rule cr "
+                "JOIN inspection_rule r ON r.id = cr.rule_id "
+                "WHERE cr.chapter_id=? ORDER BY cr.sort_order, cr.id",
                 (ch["id"],)).fetchall():
-            query_enabled = q["enabled"] != 0
+            rule_enabled = q["enabled"] != 0
             reason = PREVIEW_NO_DB
-            if only_enabled and not (chapter_enabled and query_enabled):
+            if only_enabled and not (chapter_enabled and rule_enabled):
                 reason = "所属章节已停用" if not chapter_enabled else "规则已停用"
             rule_rows.append({
                 "chapterNumber": ch["chapter_number"],
                 "chapterTitle": ch["chapter_title_zh"],
-                "queryKey": q["query_key"],
-                "querySql": q["query_sql"],
-                "descriptionZh": q["query_description_zh"],
+                "queryKey": q["rule_key"],
+                "querySql": q["rule_sql"],
+                "descriptionZh": q["rule_name_zh"],
                 "status": "SKIPPED",
                 "elapsedMs": 0,
                 "rowCount": 0,

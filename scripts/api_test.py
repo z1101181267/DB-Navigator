@@ -4,10 +4,11 @@
 DB Navigator · 巡检配置 API 契约测试
 
 对任意实现了同一套 REST 契约的后端执行全量往返测试：
-  · 模板 / 章节 / 规则 / 基线 的 CRUD
+  · 巡检配置管理：模板 / 章节 的 CRUD
+  · 规则引擎：规则库 CRUD、启停、章节 ↔ 规则 绑定
+  · 基线配置管理：基线 CRUD 与校验
   · 唯一约束与参数校验的拒绝行为
-  · 两级级联删除
-  · 预置模板保护
+  · 级联删除与预置模板保护
   · 单条与批量基线校验（含未采集语义）
 
 用法：
@@ -21,6 +22,7 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8080").rstrip("/")
 
@@ -81,11 +83,18 @@ def main():
     check("GET /summary 可用", st == 200, r)
     check("模板数 = 6", d.get("templateCount") == 6, d.get("templateCount"))
     check("章节数 = 113", d.get("totalChapters") == 113, d.get("totalChapters"))
-    check("规则数 = 160", d.get("totalQueries") == 160, d.get("totalQueries"))
+    check("规则库 = 160 条", d.get("totalRules") == 160, d.get("totalRules"))
+    check("章节引用 = 160 条", d.get("totalBindings") == 160, d.get("totalBindings"))
+    check("规则数与引用数分别统计（同一批规则被章节引用后两者可不同）",
+          isinstance(d.get("totalRules"), int) and isinstance(d.get("totalBindings"), int), d)
     check("基线数 = 88", sum((d.get("baselineCountByType") or {}).values()) == 88,
           d.get("baselineCountByType"))
     check("基线风险分布 CRITICAL=1", (d.get("baselineRiskDistribution") or {}).get("CRITICAL") == 1,
           d.get("baselineRiskDistribution"))
+    bd = d.get("byDbType") or []
+    check("总览按库类型分组含 chapters / rules / bindings",
+          bool(bd) and all(all(k in x for k in ("dbType", "templates", "chapters", "rules", "bindings"))
+                           for x in bd), bd)
 
     # ---------------- 模板 CRUD ----------------
     print("\n\u2500\u2500 模板 CRUD \u2500\u2500")
@@ -124,23 +133,86 @@ def main():
     check("更新章节", st == 200 and (r.get("data") or {}).get("chapterTitleZh") == "测试章节_改"
           and (r.get("data") or {}).get("enabled") == 0, r)
 
-    # ---------------- 规则 CRUD ----------------
-    print("\n\u2500\u2500 规则 CRUD \u2500\u2500")
-    st, r = call("POST", "/api/inspection/queries", {
-        "chapterId": cid, "key": "contract_q1",
-        "sql": "SHOW GLOBAL STATUS LIKE 'Threads_connected';",
-        "desc_zh": "当前连接数", "desc_en": "Threads connected", "enabled": 1, "sortOrder": 0})
-    check("创建规则", st == 200 and (r.get("data") or {}).get("key") == "contract_q1", r)
-    qid = (r.get("data") or {}).get("id")
+    # ---------------- 规则库（规则引擎）CRUD ----------------
+    print("\n\u2500\u2500 规则库（规则引擎）CRUD \u2500\u2500")
+    st, r = call("POST", "/api/inspection/rules", {
+        "ruleKey": "contract_rule_1", "dbType": "mysql",
+        "ruleNameZh": "契约测试规则", "ruleNameEn": "Contract rule",
+        "category": "契约测试", "ruleSql": "SHOW GLOBAL STATUS LIKE 'Threads_connected';",
+        "enabled": 1})
+    check("创建规则", st == 200 and (r.get("data") or {}).get("ruleKey") == "contract_rule_1", r)
+    rid = (r.get("data") or {}).get("id")
+    check("新规则尚无引用", (r.get("data") or {}).get("refCount") == 0, r)
 
-    st, r = call("POST", "/api/inspection/queries", {
-        "chapterId": cid, "key": "contract_q1", "sql": "SELECT 1"})
-    check("同章节重复 key 被拒绝(400)", st == 400, r)
+    st, r = call("POST", "/api/inspection/rules", {
+        "ruleKey": "contract_rule_1", "dbType": "mysql",
+        "ruleNameZh": "重复 key", "ruleSql": "SELECT 1"})
+    check("重复 rule_key 被拒绝(400)", st == 400, r)
 
-    st, r = call("PUT", f"/api/inspection/queries/{qid}", {
-        "sql": "SELECT 1;", "desc_zh": "改后描述", "desc_en": "", "enabled": 0, "sortOrder": 3})
-    check("更新规则", st == 200 and (r.get("data") or {}).get("sql") == "SELECT 1;"
+    st, r = call("POST", "/api/inspection/rules", {"dbType": "mysql"})
+    check("规则缺必填字段被拒绝(400)", st == 400, r)
+
+    st, r = call("PUT", f"/api/inspection/rules/{rid}", {
+        "ruleNameZh": "契约测试规则_改", "ruleSql": "SELECT 1;", "enabled": 0})
+    check("更新规则", st == 200 and (r.get("data") or {}).get("ruleSql") == "SELECT 1;"
           and (r.get("data") or {}).get("enabled") == 0, r)
+
+    st, r = call("GET", "/api/inspection/rules?dbType=mysql&keyword=contract_rule_1")
+    check("按关键词筛到该规则", st == 200 and len(r.get("data") or []) == 1, r)
+
+    st, r = call("GET", "/api/inspection/rules?dbType=mysql&category=" + quote("契约测试"))
+    check("按归类章节筛到该规则", st == 200 and len(r.get("data") or []) == 1, r)
+
+    # ---- 章节 ↔ 规则 绑定 ----
+    st, r = call("POST", f"/api/inspection/chapters/{cid}/rules", {"ruleId": rid})
+    check("绑定规则到章节", st == 200, r)
+
+    st, r = call("POST", f"/api/inspection/chapters/{cid}/rules", {"ruleId": rid})
+    check("重复绑定被拒绝(400)", st == 400, r)
+
+    st, r = call("GET", f"/api/inspection/chapters/{cid}/rules")
+    check("章节引用了该规则",
+          st == 200 and [x.get("id") for x in (r.get("data") or [])] == [rid], r)
+
+    st, r = call("GET", f"/api/inspection/rules/{rid}")
+    check("引用数变为 1", st == 200 and (r.get("data") or {}).get("refCount") == 1, r)
+
+    st, r = call("DELETE", f"/api/inspection/rules/{rid}")
+    check("被引用的规则默认拒绝删除(400)", st == 400, r)
+
+    st, r = call("DELETE", f"/api/inspection/chapters/{cid}/rules/{rid}")
+    check("解绑规则", st == 200, r)
+
+    st, r = call("DELETE", f"/api/inspection/chapters/{cid}/rules/{rid}")
+    check("重复解绑被拒绝(400)", st == 400, r)
+
+    # 规则是全局的，不像旧的内嵌规则那样随章节/模板级联删除，
+    # 所以这里必须显式删掉，否则下一次跑会因为 rule_key 已存在而失败。
+    st, r = call("DELETE", f"/api/inspection/rules/{rid}")
+    check("删除已解绑的规则", st == 200, r)
+
+    # ---- 规则库总览、筛选元数据、批量启停 ----
+    st, r = call("GET", "/api/inspection/rules/stats")
+    stt = r.get("data") or {}
+    check("规则库统计字段齐全",
+          st == 200 and all(k in stt for k in
+                            ("total", "enabled", "disabled", "unbound", "byDbType", "byCategory")), stt)
+    check("规则库统计口径自洽",
+          (stt.get("enabled") or 0) + (stt.get("disabled") or 0) == (stt.get("total") or 0), stt)
+
+    st, r = call("GET", "/api/inspection/rules/categories?dbType=mysql")
+    check("归类章节为非空字符串数组",
+          st == 200 and isinstance(r.get("data"), list) and r["data"]
+          and all(isinstance(x, str) for x in r["data"]), r)
+
+    # 影响条数取当前实际值再比对，避免把种子内容写死在测试里
+    kb_total = (stt.get("byDbType") or {}).get("kingbase")
+    st, r = call("POST", "/api/inspection/rules/enabled?dbType=kingbase&enabled=false")
+    check("批量停用返回影响条数",
+          st == 200 and (r.get("data") or {}).get("affected") == kb_total, r)
+    st, r = call("POST", "/api/inspection/rules/enabled?dbType=kingbase&enabled=true")
+    check("批量启用还原",
+          st == 200 and (r.get("data") or {}).get("affected") == kb_total, r)
 
     st, r = call("GET", f"/api/inspection/templates/{tid}/tree?onlyEnabled=true")
     check("onlyEnabled=true 过滤掉停用项", st == 200 and (r.get("data") or {}).get("chapters") == [], r)
@@ -270,8 +342,8 @@ def main():
     check("删除模板", st == 200, r)
     st, r = call("GET", f"/api/inspection/templates/{tid}")
     check("模板已不存在(404)", st == 404, r)
-    st, r = call("GET", f"/api/inspection/chapters/{cid}/queries")
-    check("章节级联删除后规则不可见", st == 200 and (r.get("data") or []) == [], r)
+    st, r = call("GET", f"/api/inspection/chapters/{cid}/rules")
+    check("章节删除后引用关系已清空", st == 200 and (r.get("data") or []) == [], r)
     st, r = call("DELETE", f"/api/inspection/baselines/{bid}")
     check("删除测试基线", st == 200, r)
 
@@ -436,12 +508,16 @@ def run_section(call, check):
         st, r = call("GET", "/api/inspection/templates/default/h2/tree")
         chapters = (r.get("data") or {}).get("chapters") or []
         ch_id = chapters[0].get("id") if chapters else None
-        st, r = call("POST", "/api/inspection/queries", {
-            "chapterId": ch_id, "key": "__CONTRACT_BROKEN__",
-            "sql": "SELECT * FROM __NO_SUCH_TABLE__", "desc_zh": "契约测试用坏规则",
+        st, r = call("POST", "/api/inspection/rules", {
+            "ruleKey": "__CONTRACT_BROKEN__", "dbType": "h2",
+            "ruleNameZh": "契约测试用坏规则",
+            "ruleSql": "SELECT * FROM __NO_SUCH_TABLE__",
         })
-        qid = (r.get("data") or {}).get("id")
-        check("注入坏规则成功", st == 200 and qid is not None, r)
+        rid = (r.get("data") or {}).get("id")
+        check("注入坏规则成功", st == 200 and rid is not None, r)
+
+        st, r = call("POST", f"/api/inspection/chapters/{ch_id}/rules", {"ruleId": rid})
+        check("坏规则已绑定到章节", st == 200, r)
 
         st, r = call("POST", "/api/inspection/run", {"dataSourceId": ds_id})
         run2 = r.get("data") or {}
@@ -452,7 +528,8 @@ def run_section(call, check):
         check("失败规则不影响其它规则",
               (run2.get("okQueries") or 0) > 0, run2.get("okQueries"))
 
-        call("DELETE", f"/api/inspection/queries/{qid}")
+        call("DELETE", f"/api/inspection/chapters/{ch_id}/rules/{rid}")
+        call("DELETE", f"/api/inspection/rules/{rid}")
         call("DELETE", f"/api/inspection/runs/{run2.get('id')}")
     else:
         print("  \u2500 跳过「部分失败路径」（当前后端不执行真实 SQL，"

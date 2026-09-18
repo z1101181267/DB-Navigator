@@ -8,7 +8,7 @@ SQL Server、KingbaseES，驱动可多版本共存、按需切换，巡检规则
 纳管数据库：**Oracle · MySQL · PostgreSQL · SQL Server · KingbaseES（人大金仓）**
 自检数据库：**H2（内置驱动，无需外部实例，用于端到端验证巡检链路）**
 
-Web 控制台七个顶级菜单：数据源纳管 · 驱动管理 · 巡检配置 · **基线规则** · 巡检执行 · **巡检历史** · SQL 编辑器。
+Web 控制台八个顶级菜单：数据源纳管 · 驱动管理 · **巡检配置管理** · **基线配置管理** · **规则引擎** · 巡检执行 · 巡检历史 · SQL 编辑器。
 其中「巡检历史」支持报告**在线预览**与 **Word / PDF / HTML 下载**。
 
 ---
@@ -27,7 +27,8 @@ Web 控制台七个顶级菜单：数据源纳管 · 驱动管理 · 巡检配�
 | 升级驱动不敢动，怕影响存量连接 | `is_active` 激活位，同类型仅一个生效 | `activateDriver()` 先清后置 |
 | 驱动下载源不可控（信创内网） | 驱动随包分发 + 手工上传 | 上传接口 + 种子导入 |
 | 库类型定义散落在 `elif` 链里 | 外置 JSON 元数据 | `db-types.json` + `DbTypeMeta` |
-| 巡检规则散落在各库分支代码里 | 模板 → 章节 → 规则 三级配置化落库 | `inspection_*` 五表 + 两级级联 |
+| 巡检规则散落在各库分支代码里 | 报告骨架与规则正文分离，规则库全局复用 | 模板 → 章节（引用）→ 规则库，多对多绑定 |
+| 同一条规则在多个模板里各存一份，改漏一处 | 规则正文只存一份，改一次全部生效 | `inspection_rule` + `inspection_chapter_rule` |
 | 阈值判定逻辑按库各写一遍 | 统一算子语义 + 语义枚举序 | `BaselineChecker` 单点实现 |
 | 巡检跑完只出一份 HTML，过后查不到 | 执行记录 + 明细表持久化 | `inspection_run` + 两张明细表，`/runs/latest` 支持趋势对比 |
 | 报告格式固定、不可二次加工 | 同一份数据渲染多格式 | 同一份 HTML 渲染出 HTML/PDF，另用 POI 生成可编辑 .docx |
@@ -192,25 +193,49 @@ new URLClassLoader(new URL[]{jarUrl}, ClassLoader.getPlatformClassLoader());
 
 ### 巡检配置 `/api/inspection`
 
+分为三组，与界面上「巡检配置管理 / 基线配置管理 / 规则引擎」三个菜单对应。
+
+**巡检配置管理**（报告骨架：模板 → 章节）
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/summary` | 总览：模板/章节/规则数、基线数、风险分布 |
-| GET | `/history?limit=200` | 变更历史（模板/章节/规则/基线的增删改留痕） |
+| GET | `/summary` | 总览：模板/章节数、规则库条数、章节引用数、基线数、风险分布 |
+| GET | `/history?limit=200` | 变更历史（模板/章节/规则/章节引用/基线的增删改留痕） |
 | GET | `/templates?dbType=mysql` | 模板列表 |
-| GET | `/templates/{id}/tree` | 模板树（含章节与规则，`onlyEnabled=true` 仅启用项） |
+| GET | `/templates/{id}/tree` | 模板树（含章节与其**引用的规则**，`onlyEnabled=true` 仅启用项） |
 | GET | `/templates/default/{dbType}/tree` | 该类型默认模板的树 |
 | POST | `/templates` | 新建模板 |
 | PUT | `/templates/{id}` | 更新模板（预置模板名称/版本受保护） |
 | POST | `/templates/{id}/default` | 设为该类型默认模板 |
-| DELETE | `/templates/{id}?force=true` | 删除模板（级联章节与规则；预置需 `force`） |
+| DELETE | `/templates/{id}?force=true` | 删除模板（级联章节与引用关系；预置需 `force`） |
 | GET | `/templates/{id}/chapters` | 章节列表 |
 | POST | `/chapters` | 新建章节（缺省时自动取 `MAX(chapter_number)+1`） |
 | PUT | `/chapters/{id}` | 更新章节 |
-| DELETE | `/chapters/{id}` | 删除章节（级联规则） |
-| GET | `/chapters/{id}/queries` | 规则列表 |
-| POST | `/queries` | 新建规则（`key` 在同章节内唯一） |
-| PUT | `/queries/{id}` | 更新规则（`key` 不可变更） |
-| DELETE | `/queries/{id}` | 删除规则 |
+| DELETE | `/chapters/{id}` | 删除章节（级联其引用关系，规则本身保留） |
+
+**规则引擎**（规则库 + 章节引用）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/rules` | 规则库列表，可按 `dbType` / `category` / `enabled` / `keyword` 筛选 |
+| GET | `/rules/stats` | 规则库总览：总数、启停、零引用条数、按库类型/归类章节分布 |
+| GET | `/rules/categories?dbType=` | 规则库里出现过的归类章节（供筛选下拉） |
+| GET | `/rules/{id}` | 单条规则（含 `refCount` 与 `usedBy`） |
+| POST | `/rules` | 新建规则（`ruleKey` 全局唯一） |
+| PUT | `/rules/{id}` | 更新规则（预置规则的 `ruleKey` / `dbType` 不可改） |
+| DELETE | `/rules/{id}?force=true` | 删除规则；被章节引用时默认拒绝（404 只针对不存在的 id，被引用是 400） |
+| POST | `/rules/{id}/enabled?enabled=` | 启停单条规则 |
+| POST | `/rules/enabled?dbType=&enabled=` | 按库类型批量启停 |
+| POST | `/rules/{id}/test` | **试跑**：body `{dataSourceId}`，执行一次 SQL 回显列名/结果预览/耗时。不落库、不计合规率 |
+| GET | `/chapters/{id}/rules` | 该章节引用的规则 |
+| POST | `/chapters/{id}/rules` | 绑定规则（body：`{ruleId, sortOrder?}`） |
+| DELETE | `/chapters/{id}/rules/{ruleId}` | 解绑（只删绑定行，规则保留） |
+| PUT | `/chapters/{id}/rules/order` | 重排引用顺序（body：`{ruleIds:[...]}`） |
+
+**基线配置管理**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
 | GET | `/baselines?dbType=oracle` | 基线列表 |
 | POST | `/baselines` | 新建基线（校验 operator / riskLevel / BETWEEN 区间） |
 | PUT | `/baselines/{id}` | 更新基线 |
@@ -245,38 +270,68 @@ new URLClassLoader(new URL[]{jarUrl}, ClassLoader.getPlatformClassLoader());
 
 ## 六、巡检配置体系
 
-巡检配置落库为 H2 关系表：模板 → 章节 → 规则三级配置化，阈值判定收敛到单点实现。
+巡检配置分三块：**报告骨架**（模板 → 章节）落在 H2 关系表里，**规则正文**集中存放在规则库，
+**阈值判定**收敛到单点实现。
 
-### 6.1 八张表
+### 6.1 规则库：为什么规则不放在章节下面
+
+早期模型是 `模板 → 章节 → 规则` 的三级树，规则正文内嵌在章节里。问题是**同一段 SQL 会在
+多个模板里各存一份**——六个库类型的模板各写一遍，改一处就得记得改完其余几处，漏改就出现
+「同一个巡检项，两个模板跑出不同结果」。
+
+现在把规则正文提到规则库，章节只记录**引用了哪几条规则**：
 
 ```
-inspection_template ──┬── inspection_chapter ──┬── inspection_query
-   (模板, 按库类型)     │      (章节, 1..N)       │      (规则, 1..N)
-                       │                        │
-                       └── 两级 ON DELETE CASCADE ┘
+inspection_template ── inspection_chapter ── inspection_chapter_rule ── inspection_rule
+   (模板, 按库类型)         (章节, 1..N)           (绑定, 多对多)          (规则库, 全局唯一)
+        └── ON DELETE CASCADE ──┘                      └── ON DELETE CASCADE ──┘
 
 inspection_baseline    基线阈值（按库类型，独立于模板）
-inspection_history     变更留痕（模板/章节/规则/基线的增删改）
+inspection_history     变更留痕（模板/章节/规则/章节引用/基线的增删改）
 
-inspection_run ──┬── inspection_run_query     (逐条规则结果)
+inspection_run ──┬── inspection_run_query     (逐条规则结果，执行当时的快照)
    (执行记录)     └── inspection_run_baseline  (逐条基线判定)
       └── 两级 ON DELETE CASCADE ┘
 ```
+
+由此得到两条性质：
+
+* **改一次全部生效** —— 规则正文只有一份，改 `rule_sql` 后所有引用它的模板同时变化
+* **解绑 ≠ 删除** —— 某个模板不想跑某条规则，删掉绑定行即可，规则留在库里给别的模板用
+
+绑定表**刻意不放 `enabled`**：一条规则只有一个启停开关（在规则库里）。若绑定行也能停用，
+就会出现「规则启用了、但某个绑定停用了」这种双重否定，排查时得同时看两处。
 
 | 表 | 关键字段 | 约束 |
 |---|---|---|
 | `inspection_template` | `db_type` / `template_name_zh` / `version` / `is_default` / `is_preset` | `UNIQUE(db_type, template_name_zh)`；同类型仅一个 `is_default=1` |
 | `inspection_chapter` | `template_id` / `chapter_number` / `chapter_title_zh` / `enabled` / `sort_order` | `UNIQUE(template_id, chapter_number)`；`ON DELETE CASCADE` |
-| `inspection_query` | `chapter_id` / `query_key` / `query_sql` / `query_description_zh` / `enabled` | `UNIQUE(chapter_id, query_key)`；`ON DELETE CASCADE` |
+| `inspection_rule` | `rule_key` / `db_type` / `rule_name_zh` / `rule_sql` / `category` / `enabled` / `source` | `UNIQUE(rule_key)` 全局唯一；`source ∈ {PRESET, CUSTOM}` |
+| `inspection_chapter_rule` | `chapter_id` / `rule_id` / `sort_order` | `UNIQUE(chapter_id, rule_id)`；双外键 `ON DELETE CASCADE` |
 | `inspection_baseline` | `db_type` / `param_name` / `operator` / `expected_value` / `expected_value_min|max` / `risk_level` | `UNIQUE(db_type, param_name)` |
 | `inspection_history` | `table_name` / `record_id` / `action` / `old_value` / `new_value` | 仅追加 |
 | `inspection_run` | `data_source_id` / `template_id` / `status` / `started_at` / `duration_ms` / `total_queries` / `ok_queries` / `failed_queries` / `total_baselines` / `pass_baselines` / `fail_baselines` / `unchecked_baselines` / `compliance` / `risk_summary` / `operator` / `error_msg` | `status ∈ {SUCCESS, PARTIAL, FAILED}` |
 | `inspection_run_query` | `run_id` / `chapter_number` / `query_key` / `status` / `row_count` / `truncated` / `duration_ms` / `error_msg` / `columns_json` / `rows_json` | `status ∈ {OK, FAILED, SKIPPED}`；`ON DELETE CASCADE` |
 | `inspection_run_baseline` | `run_id` / `param_name` / `operator` / `expected_value` / `actual_value` / `is_pass` / `is_checked` / `sample_count` / `violation_count` / `risk_level` / `message` | `ON DELETE CASCADE` |
 
-> `query_key` 与 `chapter_number` **创建后不可变更**——它们是巡检结果归因的稳定标识。前端编辑态会将这两个字段置为只读。
+> `rule_key` 与 `chapter_number` **创建后不可变更**——它们是巡检结果归因的稳定标识。
+> 预置规则（`source=PRESET`）的 `rule_key` 与 `db_type` 同样受保护：改了等于换一条规则，
+> 引用它的章节会莫名其妙。前端编辑态会把这些字段置为只读。
 
-### 6.2 基线算子语义
+> 执行明细表（`inspection_run_query`）是**执行当时的快照**：跑完把 SQL 与结果存一份。
+> 这是有意的——事后修改规则库，不该改写历史报告的内容。
+
+### 6.2 规则试跑
+
+`POST /rules/{id}/test` 拿真实数据源执行一次规则 SQL，返回列名、结果预览与耗时。
+
+与「巡检执行」的区别：**试跑不落库、不计入合规率、不影响任何历史记录**。它的用途是改完
+SQL 之后立刻确认能不能跑通、返回什么形状——规则库作为可编辑资产，需要这条反馈回路。
+
+库类型与数据源不匹配时**不拦截**，只在结果里标 `dbTypeMismatch=true` 并如实回报数据库的
+报错。试跑本来就是用来撞墙的，报错信息比一句「类型不匹配」有用得多。
+
+### 6.3 基线算子语义
 
 支持 `= > < >= <= != BETWEEN LIKE` 七种算子，风险等级 `LOW / MEDIUM / HIGH / CRITICAL`。
 
@@ -291,7 +346,7 @@ inspection_run ──┬── inspection_run_query     (逐条规则结果)
 
 实测值缺失（`null`）时判定为「未采集」，不计入合规率分母。注意**空字符串是合法采集值**，只有 `null` 才算未采集。
 
-### 6.3 预置内容
+### 6.4 预置内容
 
 | 库类型 | 章节 | 规则 | 基线 |
 |---|---:|---:|---:|
@@ -304,27 +359,37 @@ inspection_run ──┬── inspection_run_query     (逐条规则结果)
 | **合计** | **113** | **160** | **88** |
 
 - 五个外部库类型的章节覆盖 21 个巡检维度（连接、配置、存储、复制、锁、慢查询、安全、备份等）
-- 基线阈值为内置默认值，风险分布：`CRITICAL 1 / HIGH 17 / MEDIUM 26 / LOW 19`
+- 上表的「规则」是**规则库里的条数**。预置内容里每条规则恰好被一个章节引用，
+  所以章节引用数同样是 160；两者口径不同，`/summary` 里分别报 `totalRules` 与 `totalBindings`
+- 基线阈值为内置默认值，风险分布：`CRITICAL 1 / HIGH 19 / MEDIUM 36 / LOW 32`
   （唯一的 `CRITICAL` 是 SQL Server 的 `HAS_DBACCESS`）
 - **H2 一组是内置自检数据**：它让「驱动加载 → 规则执行 → 结果集预览 → 基线采集判定 → 落库与报告」
   整条链路在没有外部数据库的机器上也能**真实跑通**，而不是靠 mock。详见 §7.4。
 
 种子文件位于 `src/main/resources/inspection/`：
 
-- `templates.json` — 6 个模板 × 113 章节 × 160 规则
+- `rules.json` — 160 条规则正文（跨模板共享，`rule_key` 全局唯一）
+- `templates.json` — 6 个模板 × 113 章节，章节用 `rule_keys` 引用规则库
 - `baselines.json` — 88 条基线
 
-导入策略与驱动一致：**表为空时才导入**，幂等，不覆盖用户改动。预置模板 `is_preset=1`，默认拒绝删除，名称与版本受保护。
+导入策略与驱动一致：**每类数据各自判空、为空时才导入**，幂等，不覆盖用户改动。预置模板 `is_preset=1`，默认拒绝删除，名称与版本受保护。
 
-### 6.4 关键实现落点
+> 老库升级：若库里已有模板与章节、但绑定关系为空（旧版把规则内嵌在章节下），
+> 启动时会按 `templates.json` 的 `rule_keys` 只重建绑定关系，不动已有模板与章节，
+> 随后删除废弃的 `inspection_query` 表。
+
+### 6.5 关键实现落点
 
 | 环节 | 落点 |
 |---|---|
-| 种子导入入口 | `InspectionConfigService.seedIfEmpty()`（两个表各自判空，幂等） |
-| 模板种子 | `inspection/templates.json` → `loadTemplateSeed()` |
+| 种子导入入口 | `InspectionConfigService.seedIfEmpty()`（规则库 / 模板 / 基线各自判空，幂等） |
+| 规则库种子 | `inspection/rules.json` → `loadRuleSeed()` |
+| 模板种子 | `inspection/templates.json` → `loadTemplateSeed()`（含按 `rule_keys` 建绑定） |
+| 老库补绑定 | 模板在、绑定空 → `rebuildBindingsFromSeed()`，不动已有模板与章节 |
 | 基线种子 | `inspection/baselines.json` → `loadBaselineSeed()` |
+| 规则试跑 | `InspectionRunner.testRule()`，不落库 |
 | 基线判定 | `BaselineChecker.check()`，内部按算子分派到 `evaluate()` |
-| 两级级联删除 | H2 `ON DELETE CASCADE`（模板 → 章节 → 规则） |
+| 级联删除 | H2 `ON DELETE CASCADE`（模板 → 章节 → 引用；规则 → 引用） |
 | 变更留痕 | `inspection_history` + `recordHistory()` |
 
 ---
@@ -351,7 +416,7 @@ inspection_run ──┬── inspection_run_query     (逐条规则结果)
   → 查数据源（不存在 → IllegalArgumentException → HTTP 400，不落记录）
   → 解析模板：显式 templateId > 该 db_type 的默认模板
   → 开一条连接（失败 → 落一条 status=FAILED 记录并写 errorMsg）
-  → executeQueries   按「章节号 → 规则 sort_order」顺序逐条执行
+  → executeQueries   按「章节号 → 绑定表的 sort_order」顺序逐条执行章节引用的规则
   → executeBaselines 逐条采集基线实测值并判定
   → aggregate        汇总统计、判定整体 status、算合规率
   → persist          写 inspection_run 表头取自增 id，再写两张子表
@@ -579,7 +644,7 @@ export DBNAV_SECRET_KEY="your-strong-passphrase"
 
 | 脚本 | 作用 | 用法 |
 |---|---|---|
-| `scripts/api_test.py` | 巡检配置 + 巡检执行 + **报告导出** API 全量往返测试（CRUD、约束拒绝、级联删除、算子语义、执行状态机、三格式导出的文件头与文件名） | `python scripts/api_test.py [base_url]` |
+| `scripts/api_test.py` | 巡检配置管理 + 规则引擎 + 基线配置管理 + 巡检执行 + **报告导出** API 全量往返测试（CRUD、约束拒绝、绑定/解绑、级联删除、算子语义、执行状态机、三格式导出的文件头与文件名） | `python scripts/api_test.py [base_url]` |
 | `scripts/parity_check.py` | 比对 Java 与 Python 两套实现的响应体与错误码，防止契约漂移；并显式断言导出接口的**已声明差异** | `python scripts/parity_check.py [java_url] [python_url]` |
 | `scripts/dom_smoke.js` | 在 jsdom 中真实执行 `app.js`，验证渲染、页签、弹窗、驱动两栏布局、巡检执行与巡检历史交互 | `NODE_PATH=<node_modules> node scripts/dom_smoke.js` |
 | `scripts/ui_guard.js` | **真实浏览器**（headless Edge/Chrome + CDP）验证元素显隐、条件字段联动、两栏真实几何、iframe 预览加载、按钮配色 | `node scripts/ui_guard.js` |
@@ -626,8 +691,8 @@ NODE_PATH=./node_modules node scripts/dom_smoke.js
 jsdom 的 `getComputedStyle` 对布局属性给不出可信结果。
 
 ```bash
-node scripts/ui_guard.js                                    # 38 项（默认打 8080）
-DBNAV_BASE=http://127.0.0.1:9090 node scripts/ui_guard.js   # 38 项
+node scripts/ui_guard.js                                    # 44 项（默认打 8080）
+DBNAV_BASE=http://127.0.0.1:9090 node scripts/ui_guard.js   # 44 项
 ```
 
 守卫本身经过两次反向验证，都是「先让它失败」：
@@ -650,13 +715,13 @@ mvn -s .mvn/settings.xml spring-boot:run
 python devserver.py --port 9090
 
 # 终端 3：四层验证
-python scripts/api_test.py   http://127.0.0.1:8080   # 119 项
-python scripts/api_test.py   http://127.0.0.1:9090   # 99 项（执行真实 SQL 的用例跳过，导出走 501 分支）
+python scripts/api_test.py   http://127.0.0.1:8080   # 140 项
+python scripts/api_test.py   http://127.0.0.1:9090   # 119 项（执行真实 SQL 的用例跳过，导出走 501 分支）
 python scripts/parity_check.py http://127.0.0.1:8080 http://127.0.0.1:9090
-node scripts/dom_smoke.js                            # 82 项（默认打 8080）
-DBNAV_BASE=http://127.0.0.1:9090 node scripts/dom_smoke.js   # 82 项
-node scripts/ui_guard.js                             # 38 项（默认打 8080）
-DBNAV_BASE=http://127.0.0.1:9090 DBNAV_CDP_PORT=9334 node scripts/ui_guard.js   # 38 项
+node scripts/dom_smoke.js                            # 93 项（默认打 8080）
+DBNAV_BASE=http://127.0.0.1:9090 node scripts/dom_smoke.js   # 93 项
+node scripts/ui_guard.js                             # 44 项（默认打 8080）
+DBNAV_BASE=http://127.0.0.1:9090 DBNAV_CDP_PORT=9334 node scripts/ui_guard.js   # 44 项
 ```
 
 `api_test.py` 对巡检执行的断言**只校验结构、内部一致性与状态码，不校验具体数值**——
@@ -732,14 +797,15 @@ java -cp "target/classes;$(cat target/cp.txt)" scripts/PdfInspect.java /tmp/r.pd
 
 ## 十、Web 控制台
 
-导航为七个顶级菜单：
+导航为八个顶级菜单：
 
 | 模块 | 能力 |
 |---|---|
 | **数据源纳管** | 新建 / 编辑 / 删除数据源；按库类型动态切换表单字段（Oracle 显示 SID / Service Name）；JDBC URL 实时预览；连接测试 |
 | **驱动管理** | **两栏布局**（左 280px 库类型列表 / 右该类型的驱动版本表）。左栏列出**全部**受支持类型（含尚未放 JAR 的），这样「哪些类型还没配驱动」一眼可见——只列已有驱动的类型会把「缺失」这个最重要的信息藏起来。右栏表头：驱动版本 / 驱动类 / 驱动 JAR 包 / 操作，激活行淡绿底 + 激活徽标；支持激活切换、上传 JAR、扫描驱动目录；JAR 缺失时高亮期望路径 |
-| **巡检配置** | 两个页签：**巡检模板**（模板列表 → 章节手风琴 → 规则，支持增删改与启停）、**变更历史**（增删改留痕） |
-| **基线规则** | 按库类型管理 `参数 → 比较符 → 期望值` 阈值规则；顶部统计条（该类型基线数 / 启用中 / 全部类型合计 / 风险分布）；批量启停；填实测值跑试算，输出合规率与逐项结论 |
+| **巡检配置管理** | 报告骨架。两个页签：**巡检模板**（模板列表 → 章节手风琴 → 该章引用的规则，章节可增删改；「引用规则」弹窗从规则库里挑同库类型的规则绑定 / 解绑）、**变更历史**（增删改留痕）。规则正文不在这里编辑，见「规则引擎」 |
+| **基线配置管理** | 按库类型管理 `参数 → 比较符 → 期望值` 阈值规则；顶部统计条（该类型基线数 / 启用中 / 全部类型合计 / 风险分布）；批量启停；填实测值跑试算，输出合规率与逐项结论 |
+| **规则引擎** | 规则库：一条规则 = 一段采集 SQL + 归属库类型，全局唯一存放，多个模板的章节可引用同一条。顶部统计条（规则总数 / 未被引用 / 覆盖库类型）；按库类型、归类章节、启停状态、关键词筛选；新建 / 编辑 / 启停 / 删除（被引用时提示影响面并需二次确认）；**规则试跑**面板选规则 + 数据源立即执行，回显列名、结果预览与耗时 |
 | **巡检执行** | 只负责「发起 + 看本次结果」：选数据源 + 模板发起巡检，报告区展示执行状态、合规率、规则执行成功数、基线合规数；章节手风琴展开看每条规则的 SQL、耗时、行数与结果预览（NULL 以斜体区分），基线判定表 7 列（参数 / 比较符 / 期望值 / 实测值 / 结论 / 风险 / 说明） |
 | **巡检历史** | 留痕与导出。左侧执行记录列表（可按数据源 / 库类型筛选）；右侧**在线预览**，可在「报告原文」（iframe 直接加载导出的 HTML）与「结构化明细」之间切换；顶部三个下载按钮（Word 深蓝 / PDF 红 / HTML 青绿） |
 | **SQL 编辑器** | 选择数据源执行 SQL；结果表格化（含列类型）；执行耗时；`Ctrl/Cmd + Enter` 快捷执行 |
@@ -768,19 +834,20 @@ db-navigator/
 ├── scripts/
 │   ├── fetch_drivers.py                  # 下载 JDBC 驱动 JAR 到 drivers/（含内容校验）
 │   ├── preview_inspection.py             # 巡检 API 的 Python 镜像实现（预览服务用）
-│   ├── api_test.py                       # 巡检配置 + 执行 + 导出 API 契约测试（Java 119 项 / 预览 99 项）
-│   ├── parity_check.py                   # 双实现响应体/错误码一致性校验（19 GET + 12 错误路径 + 导出差异断言）
-│   ├── dom_smoke.js                      # jsdom 前端行为冒烟测试（82 项，不跑 CSS）
-│   ├── ui_guard.js                       # 真实浏览器 UI 守卫（38 项，headless Edge + CDP，零依赖）
+│   ├── api_test.py                       # 巡检配置管理 / 规则引擎 / 基线 / 执行 / 导出 API 契约测试（Java 140 项 / 预览 119 项）
+│   ├── parity_check.py                   # 双实现响应体/错误码一致性校验（27 GET + 19 错误路径 + 导出差异断言）
+│   ├── dom_smoke.js                      # jsdom 前端行为冒烟测试（93 项，不跑 CSS）
+│   ├── ui_guard.js                       # 真实浏览器 UI 守卫（44 项，headless Edge + CDP，零依赖）
 │   └── PdfInspect.java                   # PDF 报告体检：提取文本 / 嵌入字体 / 栅格化出图
 ├── drivers/                              # JDBC 驱动 JAR 存放（按 类型/版本 分层）
 ├── src/main/resources/
 │   ├── application.yml                   # 端口、H2、连接池、自定义配置
-│   ├── schema.sql                        # 驱动 / 数据源 / 查询历史 / 巡检配置五表 / 巡检执行三表 建表
+│   ├── schema.sql                        # 驱动 / 数据源 / 查询历史 / 巡检配置四表 / 巡检执行三表 建表
 │   ├── db-types.json                     # 库类型元数据（含 h2 自检类型）
 │   ├── drivers-seed.json                 # 驱动种子（仅元数据，导入时按文件名解析路径）
 │   ├── inspection/
-│   │   ├── templates.json                # 巡检模板种子（6 模板 / 113 章节 / 160 规则）
+│   │   ├── rules.json                    # 规则库种子（160 条，跨模板共享的规则正文）
+│   │   ├── templates.json                # 巡检模板种子（6 模板 / 113 章节，章节按 rule_keys 引用规则）
 │   │   └── baselines.json                # 基线种子（88 条，含 h2 自检组）
 │   └── static/                           # Web 控制台（index.html / css / js）
 └── src/main/java/com/dbnav/
@@ -824,7 +891,8 @@ db-navigator/
 | 巡检执行 | 手动发起（`POST /api/inspection/run`），结果落库为「执行记录 + 明细」 | 保留历史才能做趋势对比；定时调度留待后续接入 |
 | 巡检报告 | 前端按需渲染 + `/runs/latest` 支持「与上次对比」 | 报告与数据解耦，便于换皮与二次加工 |
 | 报告导出 | `GET /runs/{id}/export?format=html\|word\|pdf`，三种格式共用一份数据 | 接口收敛为一个（`format` 参数区分）；HTML/PDF 复用同一渲染器，不会出现「预览对、导出错」 |
-| 导航结构 | 驱动管理 / 基线规则 / 巡检历史各为**独立顶级菜单** | 基线配置与「发起巡检」是两件事，塞进同一个页签会让日常操作变绕 |
+| 导航结构 | 驱动管理 / 基线配置管理 / 规则引擎 / 巡检历史各为**独立顶级菜单** | 基线配置与「发起巡检」是两件事，塞进同一个页签会让日常操作变绕；规则库是跨模板复用的资产，挂在某个模板下面就没法表达「一条规则被多个模板引用」 |
+| 规则归属 | 规则正文集中在规则库，章节只存引用关系 | 同一段 SQL 在多个模板里各存一份，改一处就得记得改完其余几处 |
 | 自检能力 | 内置 `h2` 自检类型（`driver_bundled`，无需外部库） | 让整条链路可端到端验证，不靠 mock |
 
 几处刻意的取舍：
